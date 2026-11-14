@@ -1,0 +1,59 @@
+[project]
+name = "cronplane-actions"
+version = "0.1.0"
+description = "Write Cronplane actions in Python: typed inputs, outputs, secrets, masked values and an HTTP client that guards against SSRF."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# None at run time: every action pins this package by hash, and each
+# dependency would enter its SBOM, its scans and its revocations.
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/cronplane/cronplane-sdk"
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PT", "ANN", "BLE", "TRY", "PL"]
+# TRY003: a message names the input, URL or file at fault; a class per
+# message would hide those values.
+ignore = ["TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, use magic values and reach the private helpers they test.
+"tests/**" = ["S101", "PLR2004", "PLC2701", "ANN401"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=cronplane_actions --cov-branch --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.report]
+# Measured on 2026-11-14; it never goes down.
+fail_under = 99
+
+[dependency-groups]
+dev = [
+    "pip-audit>=2.10.1",
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.5",
+]
