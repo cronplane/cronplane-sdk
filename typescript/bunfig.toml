@@ -1,0 +1,4 @@
+[test]
+coverageReporter = ["text"]
+# Measured on 2026-11-14; it never goes down.
+coverageThreshold = { lines = 0.99, functions = 1.0 }

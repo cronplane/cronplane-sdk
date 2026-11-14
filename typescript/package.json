@@ -1,0 +1,36 @@
+{
+  "name": "@cronplane/actions",
+  "version": "0.1.0",
+  "description": "Write Cronplane actions in TypeScript for Bun: typed inputs, outputs, secrets, masked values and an HTTP client that guards against SSRF.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cronplane/cronplane-sdk.git",
+    "directory": "typescript"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "bun": ">=1.2"
+  },
+  "scripts": {
+    "check": "tsc --noEmit && eslint . && bun test --coverage && bun audit --production"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "eslint": "^10.15.0",
+    "eslint-plugin-security": "^4.2.1",
+    "typescript": "6",
+    "typescript-eslint": "^8.72.2"
+  },
+  "overrides": {
+    "minimatch": "^11.0.8"
+  }
+}
