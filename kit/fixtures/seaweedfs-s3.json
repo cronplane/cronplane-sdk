@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "fixture",
+      "credentials": [{ "accessKey": "fixture", "secretKey": "fixture-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

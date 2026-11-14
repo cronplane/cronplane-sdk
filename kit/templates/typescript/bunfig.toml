@@ -1,0 +1,3 @@
+[test]
+# The coverage measured; it never goes down.
+coverageThreshold = { lines = 0.9 }

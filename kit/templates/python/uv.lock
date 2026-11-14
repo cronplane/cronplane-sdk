@@ -1,0 +1,19 @@
+version = 1
+revision = 5
+requires-python = ">=3.12"
+
+[[package]]
+name = "cronplane-actions"
+version = "0.1.0"
+source = { git = "ssh://git@github.com/crabisoft/cronplane-actions-python.git?rev=9a8df9a4cec1192d61d65430244123d2ef1b518d#9a8df9a4cec1192d61d65430244123d2ef1b518d" }
+
+[[package]]
+name = "my-action"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "cronplane-actions" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cronplane-actions", git = "ssh://git@github.com/crabisoft/cronplane-actions-python.git?rev=9a8df9a4cec1192d61d65430244123d2ef1b518d" }]

@@ -1,0 +1,13 @@
+# The rules of every Python action, whatever its own configuration says
+# (the kit passes this file to ruff with --config).
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PT", "ANN", "BLE", "TRY", "PL"]
+# TRY003: a message names what is at fault.
+ignore = ["TRY003"]
+
+[lint.per-file-ignores]
+# Tests assert and use literal values.
+"tests/**" = ["S101", "PLR2004"]

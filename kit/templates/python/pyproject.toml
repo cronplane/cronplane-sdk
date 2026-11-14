@@ -1,0 +1,20 @@
+[project]
+name = "my-action"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["cronplane-actions"]
+
+[tool.uv]
+package = false
+
+# Until the library is on PyPI: its repository, pinned by commit in uv.lock.
+[tool.uv.sources]
+cronplane-actions = { git = "ssh://git@github.com/crabisoft/cronplane-actions-python.git", rev = "9a8df9a4cec1192d61d65430244123d2ef1b518d" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.coverage.report]
+# The coverage measured; it never goes down.
+fail_under = 80
+omit = ["tests/*"]

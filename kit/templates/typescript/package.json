@@ -1,0 +1,11 @@
+{
+  "name": "my-action",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cronplane/actions": "git+ssh://git@github.com/crabisoft/cronplane-actions-ts.git#613b042c58885cfc3eb5acfd2a16d430bd5c07ca"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4"
+  }
+}

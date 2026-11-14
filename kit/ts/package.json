@@ -1,0 +1,24 @@
+{
+  "name": "cronplane-kit-ts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The TypeScript adapter of the kit for Cronplane actions: checks an action as the hub will.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "cronplane-kit-ts": "./src/cli.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit && eslint . && bun test --coverage && bun audit --ignore=GHSA-fc5q-39xc-vjpf"
+  },
+  "overrides": {
+    "minimatch": "^11.0.8"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "eslint": "^10.15.0",
+    "eslint-plugin-security": "^4.2.1",
+    "typescript": "6",
+    "typescript-eslint": "^8.72.2"
+  }
+}

@@ -1,0 +1,48 @@
+[project]
+name = "cronplane-kit"
+version = "0.1.0"
+description = "The Python adapter of the kit for Cronplane actions: checks an action as the hub will."
+license = "Apache-2.0"
+requires-python = ">=3.11"
+# The tools the kit runs on every Python action, at the versions it pins:
+# an action cannot loosen them.
+dependencies = [
+    "ruff==0.17.3",
+    "pyright==1.1.414",
+    "pip-audit==2.10.1",
+]
+
+[project.scripts]
+cronplane-kit = "cronplane_kit.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PT", "ANN", "BLE", "TRY", "PL"]
+# TRY003: a message names the step, file or version at fault.
+ignore = ["TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "S603"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["src", "tests"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=cronplane_kit --cov-branch --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.report]
+# Measured on 2026-11-14; it never goes down.
+fail_under = 100

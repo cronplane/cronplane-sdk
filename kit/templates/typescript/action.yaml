@@ -1,0 +1,14 @@
+version: 1
+name: my-action                 # rename: ^[a-z][a-z0-9_-]{0,62}$
+description: Says hello to someone, the model of a TypeScript action
+inputs:
+  who: {type: string, pattern: '^[A-Za-z][A-Za-z -]{0,39}$', untrusted: true}
+  shout: {type: boolean, default: false}
+outputs:
+  greeting: {type: string, required: true}
+runtime: typescript
+bun: ["1.4"]                   # the minors it is tested on (the kit's matrix)
+lock: bun.lock
+file: main.ts
+requires: {cronplane: ">=0.1"}  # the Cronplane it runs on: at least the one its library needs
+network: false

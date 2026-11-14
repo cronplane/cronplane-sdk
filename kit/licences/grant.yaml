@@ -1,0 +1,34 @@
+# The licence policy of Cronplane actions, read by grant on the SBOM (Syft)
+# of an action's installed dependencies. Decided on 2026-11-14:
+# - allowed: permissive licences, and weak copyleft (LGPL, MPL-2.0) for
+#   packages used unmodified, whose sources stay public;
+# - refused: GPL, AGPL, SSPL, and any licence unknown or missing;
+# - an exception is a package the action lists, with its reason, in its
+#   `licence-exceptions.txt`, reviewed with the action.
+# Anything not allowed below is refused.
+allow:
+  - 0BSD
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - CC0-1.0
+  - ISC
+  - MIT
+  - MIT-0
+  - PSF-2.0
+  - Python-2.0
+  - Unlicense
+  - Zlib
+  - LGPL-2.0-only
+  - LGPL-2.0-or-later
+  - LGPL-2.1-only
+  - LGPL-2.1-or-later
+  - LGPL-3.0-only
+  - LGPL-3.0-or-later
+  - MPL-2.0
+  # The LGPL named by a PyPI classifier rather than an SPDX id (grant reads
+  # it without its LicenseRef- prefix).
+  - "GNU-Lesser-General-Public-License-*"
+require-license: true
+require-known-license: false
+ignore-packages: []

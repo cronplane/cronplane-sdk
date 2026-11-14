@@ -1,0 +1,7 @@
+# Tool versions for local work and the CI of the kit and of the actions.
+[tools]
+uv = "0.13"
+bun = "1.4"
+# The SBOM of an action's installed dependencies, and the licence policy.
+"aqua:anchore/syft" = "1.55.0"
+"ubi:anchore/grant" = "0.6.8"
