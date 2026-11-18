@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "variable": "CRONPLANE_NETWORK_ALLOW",
+  "hosts": {
+    "valid": [
+      "api.hubapi.com",
+      "*.my.salesforce.com",
+      "db.acme.internal:5432",
+      "localhost",
+      "10.0.0.7",
+      "10.0.0.7:5432",
+      "2001:db8::1",
+      "[2001:db8::1]:5432",
+      "[2001:db8::1]",
+      "*.example.com:443"
+    ],
+    "invalid": [
+      "",
+      "API.hubapi.com",
+      "https://api.hubapi.com",
+      "api.hubapi.com/v3",
+      "*",
+      "*.",
+      "api.*.com",
+      "-a.example.com",
+      "a..example.com",
+      "example.com:0",
+      "example.com:65536",
+      "example.com:pg",
+      "example.com:+443",
+      "example.com:",
+      "[2001:db8::1",
+      "[10.0.0.7]:5432",
+      "[2001:db8::1]5432",
+      "a b"
+    ]
+  },
+  "lists": [
+    {
+      "name": "a name allows itself on any port, whatever its case and a final dot",
+      "allow": ["api.hubapi.com"],
+      "allowed": [["api.hubapi.com", 443], ["api.hubapi.com", 80], ["API.HubApi.com", 443], ["api.hubapi.com.", 443]],
+      "refused": [["hubapi.com", 443], ["evil-api.hubapi.com", 443], ["api.hubapi.com.evil.example", 443], ["x.api.hubapi.com", 443], ["10.0.0.7", 443]]
+    },
+    {
+      "name": "a name with a port allows that port only",
+      "allow": ["db.acme.internal:5432"],
+      "allowed": [["db.acme.internal", 5432]],
+      "refused": [["db.acme.internal", 5433], ["db.acme.internal", 443]]
+    },
+    {
+      "name": "a name under a domain, never the domain itself",
+      "allow": ["*.my.salesforce.com"],
+      "allowed": [["acme.my.salesforce.com", 443], ["a.b.my.salesforce.com", 443], ["ACME.my.salesforce.com", 8443]],
+      "refused": [["my.salesforce.com", 443], ["evilmy.salesforce.com", 443], ["salesforce.com", 443], ["acme.my.salesforce.com.evil.example", 443]]
+    },
+    {
+      "name": "an address allows that address, in any writing",
+      "allow": ["10.0.0.7:5432", "2001:db8::1"],
+      "allowed": [["10.0.0.7", 5432], ["2001:db8::1", 443], ["2001:0db8:0000:0000:0000:0000:0000:0001", 5432], ["[2001:db8::1]", 5432]],
+      "refused": [["10.0.0.7", 22], ["10.0.0.8", 5432], ["2001:db8::2", 443], ["db.acme.internal", 5432]]
+    },
+    {
+      "name": "a name under a domain never allows an address that ends like it",
+      "allow": ["*.0.7"],
+      "allowed": [["db.0.7", 5432]],
+      "refused": [["10.0.0.7", 5432], ["0.7", 5432]]
+    },
+    {
+      "name": "any host of the list is enough",
+      "allow": ["api.hubapi.com", "*.hubspot.com:443"],
+      "allowed": [["api.hubapi.com", 8080], ["forms.hubspot.com", 443]],
+      "refused": [["forms.hubspot.com", 80], ["example.com", 443]]
+    }
+  ]
+}

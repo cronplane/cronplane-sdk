@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "keywords": {
+    "type": "one of object, array, string, integer, number, boolean, null, or a list of them, each once",
+    "properties": "an object: the schema of each property named",
+    "required": "an object: the properties it must have, a list of names, each once; a problem is at the property missing",
+    "additionalProperties": "an object: false refuses the properties not named in properties; a schema checks them",
+    "items": "an array: the schema of each item",
+    "minItems": "an array: its smallest number of items, an integer from 0",
+    "maxItems": "an array: its largest number of items, an integer from 0",
+    "enum": "the only values allowed: a list of strings, numbers, booleans or null, one at least",
+    "minLength": "a string: its smallest length in Unicode code points, an integer from 0",
+    "maxLength": "a string: its largest length in Unicode code points, an integer from 0",
+    "minimum": "a number: its smallest value",
+    "maximum": "a number: its largest value",
+    "format": "a string: date-time only (RFC 3339, a real date and time, no leap second)"
+  },
+  "annotations": ["$schema", "title", "description", "default", "examples"],
+  "limits": {"depth": 32},
+  "schemas": [
+    {
+      "name": "a flat record with a key, a nullable text and a date",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Contact",
+        "type": "object",
+        "properties": {
+          "id": {"type": "integer", "minimum": 1},
+          "email": {"type": "string", "minLength": 3, "maxLength": 254},
+          "name": {"type": ["string", "null"], "description": "As the source gives it"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "email"]
+      },
+      "valid": [
+        {"id": 1, "email": "a@acme.test"},
+        {"id": 1.0, "email": "a@acme.test", "name": null, "updated_at": "2026-11-08T12:45:00+00:00"},
+        {"id": 7, "email": "a@acme.test", "name": "Ada", "updated_at": "2026-11-08t12:45:00.123456z", "extra": [1, {"a": null}]}
+      ],
+      "invalid": [
+        {"record": {"email": "a@acme.test"}, "problems": [{"at": "/id", "keyword": "required"}]},
+        {"record": {}, "problems": [{"at": "/id", "keyword": "required"}, {"at": "/email", "keyword": "required"}]},
+        {"record": {"id": "1", "email": "a@acme.test"}, "problems": [{"at": "/id", "keyword": "type"}]},
+        {"record": {"id": 1.5, "email": "a@acme.test"}, "problems": [{"at": "/id", "keyword": "type"}]},
+        {"record": {"id": true, "email": "a@acme.test"}, "problems": [{"at": "/id", "keyword": "type"}]},
+        {"record": {"id": 0, "email": "a@acme.test"}, "problems": [{"at": "/id", "keyword": "minimum"}]},
+        {"record": {"id": 1, "email": "ab"}, "problems": [{"at": "/email", "keyword": "minLength"}]},
+        {"record": {"id": 1, "email": null}, "problems": [{"at": "/email", "keyword": "type"}]},
+        {"record": {"id": 1, "email": "a@acme.test", "name": 3}, "problems": [{"at": "/name", "keyword": "type"}]},
+        {"record": {"id": 0, "email": 5}, "problems": [{"at": "/id", "keyword": "minimum"}, {"at": "/email", "keyword": "type"}]}
+      ]
+    },
+    {
+      "name": "a real date and time, as RFC 3339 writes it",
+      "schema": {"type": "object", "properties": {"at": {"type": "string", "format": "date-time"}}},
+      "valid": [
+        {"at": "2026-11-08T12:45:00Z"},
+        {"at": "2024-02-29T23:59:59-05:30"},
+        {"at": "2026-11-08T12:45:00.5+00:00"},
+        {"at": "0000-02-29T00:00:00Z"}
+      ],
+      "invalid": [
+        {"record": {"at": 5}, "problems": [{"at": "/at", "keyword": "type"}]},
+        {"record": {"at": "2026-11-08"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08 12:45:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:45:00"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:45Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-02-29T12:45:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-13-01T12:45:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T24:00:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:60:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-12-31T23:59:60Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:45:00+24:00"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:45:00+0000"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "２０２６-11-08T12:45:00Z"}, "problems": [{"at": "/at", "keyword": "format"}]},
+        {"record": {"at": "2026-11-08T12:45:00Z\n"}, "problems": [{"at": "/at", "keyword": "format"}]}
+      ]
+    },
+    {
+      "name": "a keyword applies to the values of its type only",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "free": {},
+          "text": {"minLength": 2, "maximum": 3, "minItems": 1},
+          "count": {"type": ["integer", "string"], "maximum": 10, "maxLength": 2}
+        }
+      },
+      "valid": [
+        {"free": {"any": ["thing", 1, null]}, "text": 2, "count": 10},
+        {"free": null, "text": "ab", "count": "ab"},
+        {"text": [0], "count": -5},
+        {"text": {"minLength": 0}}
+      ],
+      "invalid": [
+        {"record": {"text": "a"}, "problems": [{"at": "/text", "keyword": "minLength"}]},
+        {"record": {"text": 4}, "problems": [{"at": "/text", "keyword": "maximum"}]},
+        {"record": {"text": []}, "problems": [{"at": "/text", "keyword": "minItems"}]},
+        {"record": {"count": 11}, "problems": [{"at": "/count", "keyword": "maximum"}]},
+        {"record": {"count": "abc"}, "problems": [{"at": "/count", "keyword": "maxLength"}]},
+        {"record": {"count": 1.5}, "problems": [{"at": "/count", "keyword": "type"}]}
+      ]
+    },
+    {
+      "name": "a length is counted in Unicode code points",
+      "schema": {"type": "object", "properties": {"s": {"type": "string", "minLength": 2, "maxLength": 3}}},
+      "valid": [{"s": "ab"}, {"s": "😀😀"}, {"s": "é😀a"}],
+      "invalid": [
+        {"record": {"s": "😀"}, "problems": [{"at": "/s", "keyword": "minLength"}]},
+        {"record": {"s": "😀😀😀😀"}, "problems": [{"at": "/s", "keyword": "maxLength"}]}
+      ]
+    },
+    {
+      "name": "numbers: an integer has no fraction, a boolean is no number",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "n": {"type": "number", "minimum": -1.5, "maximum": 1e3},
+          "i": {"type": "integer"},
+          "b": {"type": "boolean"},
+          "z": {"type": "null"}
+        }
+      },
+      "valid": [
+        {"n": -1.5, "i": -3, "b": false, "z": null},
+        {"n": 1000, "i": 2.0},
+        {"n": 0, "i": 1e2}
+      ],
+      "invalid": [
+        {"record": {"n": true}, "problems": [{"at": "/n", "keyword": "type"}]},
+        {"record": {"n": "1"}, "problems": [{"at": "/n", "keyword": "type"}]},
+        {"record": {"n": -1.6}, "problems": [{"at": "/n", "keyword": "minimum"}]},
+        {"record": {"n": 1000.5}, "problems": [{"at": "/n", "keyword": "maximum"}]},
+        {"record": {"i": 2.5}, "problems": [{"at": "/i", "keyword": "type"}]},
+        {"record": {"b": 0}, "problems": [{"at": "/b", "keyword": "type"}]},
+        {"record": {"b": "true"}, "problems": [{"at": "/b", "keyword": "type"}]},
+        {"record": {"z": 0}, "problems": [{"at": "/z", "keyword": "type"}]},
+        {"record": {"z": ""}, "problems": [{"at": "/z", "keyword": "type"}]}
+      ]
+    },
+    {
+      "name": "an enum compares values as JSON does",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "status": {"enum": ["open", "closed", null]},
+          "level": {"type": "integer", "enum": [1, 2, 3]},
+          "flag": {"enum": [true, 0]}
+        }
+      },
+      "valid": [
+        {"status": "open", "level": 1, "flag": true},
+        {"status": null, "level": 2.0, "flag": 0},
+        {"flag": 0.0}
+      ],
+      "invalid": [
+        {"record": {"status": "Open"}, "problems": [{"at": "/status", "keyword": "enum"}]},
+        {"record": {"status": 1}, "problems": [{"at": "/status", "keyword": "enum"}]},
+        {"record": {"level": 4}, "problems": [{"at": "/level", "keyword": "enum"}]},
+        {"record": {"level": "1"}, "problems": [{"at": "/level", "keyword": "type"}, {"at": "/level", "keyword": "enum"}]},
+        {"record": {"flag": false}, "problems": [{"at": "/flag", "keyword": "enum"}]},
+        {"record": {"flag": 1}, "problems": [{"at": "/flag", "keyword": "enum"}]},
+        {"record": {"flag": "true"}, "problems": [{"at": "/flag", "keyword": "enum"}]}
+      ]
+    },
+    {
+      "name": "nested objects and arrays, each problem at its place",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "tags": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "maxItems": 3},
+          "address": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}, "zip": {"type": ["string", "null"]}},
+            "required": ["city"],
+            "additionalProperties": false
+          },
+          "lines": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"qty": {"type": "integer", "minimum": 1}}, "required": ["qty"]}
+          }
+        }
+      },
+      "valid": [
+        {"tags": ["a"], "address": {"city": "Paris", "zip": null}, "lines": [{"qty": 1}, {"qty": 2, "sku": "x"}]},
+        {"tags": ["a", "b", "c"], "lines": []}
+      ],
+      "invalid": [
+        {"record": {"tags": []}, "problems": [{"at": "/tags", "keyword": "minItems"}]},
+        {"record": {"tags": ["a", "b", "c", "d"]}, "problems": [{"at": "/tags", "keyword": "maxItems"}]},
+        {"record": {"tags": ["a", "", 3]}, "problems": [{"at": "/tags/1", "keyword": "minLength"}, {"at": "/tags/2", "keyword": "type"}]},
+        {"record": {"tags": "a"}, "problems": [{"at": "/tags", "keyword": "type"}]},
+        {"record": {"address": {"zip": "75001"}}, "problems": [{"at": "/address/city", "keyword": "required"}]},
+        {"record": {"address": {"city": "Paris", "country": "FR"}}, "problems": [{"at": "/address/country", "keyword": "additionalProperties"}]},
+        {"record": {"address": []}, "problems": [{"at": "/address", "keyword": "type"}]},
+        {"record": {"lines": [{"qty": 1}, {"qty": 0}, {}]}, "problems": [{"at": "/lines/1/qty", "keyword": "minimum"}, {"at": "/lines/2/qty", "keyword": "required"}]}
+      ]
+    },
+    {
+      "name": "the other properties: refused, or checked by a schema",
+      "schema": {
+        "type": "object",
+        "properties": {"id": {"type": "integer"}},
+        "additionalProperties": {"type": "string"}
+      },
+      "valid": [{"id": 1}, {"id": 1, "note": "x", "a/b": "y", "~": "z"}, {}],
+      "invalid": [
+        {"record": {"id": 1, "note": 2}, "problems": [{"at": "/note", "keyword": "type"}]},
+        {"record": {"a/b": 1, "~t": 2}, "problems": [{"at": "/a~1b", "keyword": "type"}, {"at": "/~0t", "keyword": "type"}]}
+      ]
+    },
+    {
+      "name": "a record is an object",
+      "schema": {"type": "object"},
+      "valid": [{}, {"anything": [1, "a", null, {"b": true}]}],
+      "invalid": [
+        {"record": [], "problems": [{"at": "", "keyword": "type"}]},
+        {"record": "x", "problems": [{"at": "", "keyword": "type"}]},
+        {"record": null, "problems": [{"at": "", "keyword": "type"}]},
+        {"record": 1, "problems": [{"at": "", "keyword": "type"}]}
+      ]
+    }
+  ],
+  "refused": [
+    {"name": "the schema of a record is an object schema", "schema": {}, "at": "", "keyword": "type"},
+    {"name": "a record is never a list of types", "schema": {"type": ["object", "null"]}, "at": "", "keyword": "type"},
+    {"name": "a record is never another type", "schema": {"type": "array"}, "at": "", "keyword": "type"},
+    {"name": "a schema is an object", "schema": {"type": "object", "properties": {"a": true}}, "at": "/properties/a", "keyword": ""},
+    {"name": "a keyword out of the list", "schema": {"type": "object", "properties": {"a": {"type": "string", "pattern": "^a"}}}, "at": "/properties/a", "keyword": "pattern"},
+    {"name": "a combination of schemas", "schema": {"type": "object", "properties": {"a": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}, "at": "/properties/a", "keyword": "anyOf"},
+    {"name": "a reference", "schema": {"type": "object", "properties": {"a": {"$ref": "#/$defs/a"}}}, "at": "/properties/a", "keyword": "$ref"},
+    {"name": "an unknown type", "schema": {"type": "object", "properties": {"a": {"type": "date"}}}, "at": "/properties/a", "keyword": "type"},
+    {"name": "a type twice", "schema": {"type": "object", "properties": {"a": {"type": ["string", "string"]}}}, "at": "/properties/a", "keyword": "type"},
+    {"name": "an empty list of types", "schema": {"type": "object", "properties": {"a": {"type": []}}}, "at": "/properties/a", "keyword": "type"},
+    {"name": "another format", "schema": {"type": "object", "properties": {"a": {"type": "string", "format": "email"}}}, "at": "/properties/a", "keyword": "format"},
+    {"name": "properties is an object", "schema": {"type": "object", "properties": []}, "at": "", "keyword": "properties"},
+    {"name": "required is a list of names", "schema": {"type": "object", "required": "id"}, "at": "", "keyword": "required"},
+    {"name": "required names each property once", "schema": {"type": "object", "required": ["id", "id"]}, "at": "", "keyword": "required"},
+    {"name": "required names are text", "schema": {"type": "object", "required": [1]}, "at": "", "keyword": "required"},
+    {"name": "additionalProperties is a boolean or a schema", "schema": {"type": "object", "additionalProperties": "no"}, "at": "", "keyword": "additionalProperties"},
+    {"name": "items is one schema", "schema": {"type": "object", "properties": {"a": {"type": "array", "items": [{"type": "string"}]}}}, "at": "/properties/a", "keyword": "items"},
+    {"name": "an enum has a value", "schema": {"type": "object", "properties": {"a": {"enum": []}}}, "at": "/properties/a", "keyword": "enum"},
+    {"name": "an enum holds scalars", "schema": {"type": "object", "properties": {"a": {"enum": [["x"]]}}}, "at": "/properties/a", "keyword": "enum"},
+    {"name": "a length is an integer from 0", "schema": {"type": "object", "properties": {"a": {"minLength": -1}}}, "at": "/properties/a", "keyword": "minLength"},
+    {"name": "a length is not a fraction", "schema": {"type": "object", "properties": {"a": {"maxLength": 1.5}}}, "at": "/properties/a", "keyword": "maxLength"},
+    {"name": "a number of items is an integer", "schema": {"type": "object", "properties": {"a": {"minItems": "1"}}}, "at": "/properties/a", "keyword": "minItems"},
+    {"name": "a bound is a number", "schema": {"type": "object", "properties": {"a": {"minimum": "0"}}}, "at": "/properties/a", "keyword": "minimum"},
+    {"name": "a bound is not a boolean", "schema": {"type": "object", "properties": {"a": {"maximum": true}}}, "at": "/properties/a", "keyword": "maximum"},
+    {"name": "a problem deep in the schema names its place", "schema": {"type": "object", "properties": {"lines": {"type": "array", "items": {"type": "object", "properties": {"a/b": {"const": 1}}}}}}, "at": "/properties/lines/items/properties/a~1b", "keyword": "const"},
+    {"name": "a schema under additionalProperties is checked too", "schema": {"type": "object", "additionalProperties": {"oneOf": []}}, "at": "/additionalProperties", "keyword": "oneOf"}
+  ]
+}

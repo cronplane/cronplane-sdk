@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "variable": "CRONPLANE_VERSION",
+  "since": {
+    "schema": "0.1",
+    "streams": "0.1",
+    "state": "0.1",
+    "network": "0.1"
+  },
+  "accepted": [
+    { "name": "the version needed", "needs": "0.1", "cronplane": "0.1.0" },
+    { "name": "a later patch", "needs": "0.1", "cronplane": "0.1.7" },
+    { "name": "a later minor", "needs": "0.1", "cronplane": "0.4.2" },
+    { "name": "minors compare as numbers", "needs": "1.9", "cronplane": "1.10.0" },
+    { "name": "a pre-release counts as its version", "needs": "0.2", "cronplane": "0.2.0-rc.1" },
+    { "name": "a build suffix is not read", "needs": "0.2", "cronplane": "0.2.0+20261118" }
+  ],
+  "refused": [
+    {
+      "name": "an older minor",
+      "needs": "0.2",
+      "cronplane": "0.1.9",
+      "message": "this action needs Cronplane 0.2 or newer: this is Cronplane 0.1.9"
+    },
+    {
+      "name": "minors compare as numbers",
+      "needs": "1.10",
+      "cronplane": "1.9.3",
+      "message": "this action needs Cronplane 1.10 or newer: this is Cronplane 1.9.3"
+    },
+    {
+      "name": "a later major",
+      "needs": "0.1",
+      "cronplane": "1.0.0",
+      "message": "this action needs Cronplane 0.x, from 0.1: this is Cronplane 1.0.0"
+    },
+    {
+      "name": "an older major",
+      "needs": "2.0",
+      "cronplane": "1.8.0",
+      "message": "this action needs Cronplane 2.0 or newer: this is Cronplane 1.8.0"
+    },
+    {
+      "name": "a worker that does not say its version",
+      "needs": "0.1",
+      "cronplane": null,
+      "message": "this action needs Cronplane 0.1 or newer: the worker does not say its version (CRONPLANE_VERSION)"
+    }
+  ],
+  "malformed": ["", "1", "1.2", "v1.2.3", "1.2.x", "1.2.3.4", "1.-2.3", " 1.2.3", "1.2.3 "]
+}

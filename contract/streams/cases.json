@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "limits": {
+    "part_records": 100000,
+    "part_bytes": 67108864
+  },
+  "write": {
+    "step": "export",
+    "stream": "contacts",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "email"
+      ]
+    },
+    "key_properties": [
+      "id"
+    ],
+    "bookmark_properties": [
+      "updated_at"
+    ],
+    "max_rejected": 2,
+    "records": [
+      {
+        "id": 1,
+        "email": "ada@acme.test",
+        "name": "Ada",
+        "updated_at": "2026-11-08T12:45:00+00:00"
+      },
+      {
+        "id": 2,
+        "email": "é😀@acme.test",
+        "name": null
+      },
+      {
+        "id": "3",
+        "email": "c@acme.test"
+      },
+      {
+        "id": 4,
+        "email": "d@acme.test",
+        "tags": [
+          "a",
+          "b"
+        ],
+        "address": {
+          "city": "Paris"
+        }
+      },
+      {
+        "email": "x"
+      },
+      {
+        "id": 6,
+        "email": "f@acme.test",
+        "updated_at": "2026-11-08T12:45:00Z"
+      }
+    ],
+    "schema_json": {
+      "version": 1,
+      "stream": "contacts",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "email": {
+            "type": "string",
+            "minLength": 3
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ]
+      },
+      "key_properties": [
+        "id"
+      ],
+      "bookmark_properties": [
+        "updated_at"
+      ],
+      "encoding": {
+        "format": "jsonl",
+        "compression": "gzip"
+      }
+    },
+    "lines": [
+      "{\"id\":1,\"email\":\"ada@acme.test\",\"name\":\"Ada\",\"updated_at\":\"2026-11-08T12:45:00+00:00\"}",
+      "{\"id\":2,\"email\":\"é😀@acme.test\",\"name\":null}",
+      "{\"id\":4,\"email\":\"d@acme.test\",\"tags\":[\"a\",\"b\"],\"address\":{\"city\":\"Paris\"}}",
+      "{\"id\":6,\"email\":\"f@acme.test\",\"updated_at\":\"2026-11-08T12:45:00Z\"}"
+    ],
+    "rejected_lines": [
+      "{\"record\":{\"id\":\"3\",\"email\":\"c@acme.test\"},\"reason\":\"/id: type\",\"key\":{\"id\":\"3\"}}",
+      "{\"record\":{\"email\":\"x\"},\"reason\":\"/id: required; /email: minLength\",\"key\":{}}"
+    ]
+  },
+  "read": {
+    "folder": "golden",
+    "name": "contacts",
+    "stream": "contacts",
+    "parts": [
+      "part-00001.jsonl.gz",
+      "part-00002.jsonl.gz"
+    ],
+    "key_properties": [
+      "id"
+    ],
+    "bookmark_properties": [
+      "updated_at"
+    ],
+    "records": [
+      {
+        "id": 1,
+        "email": "ada@acme.test",
+        "name": "Ada",
+        "updated_at": "2026-11-08T12:45:00+00:00"
+      },
+      {
+        "id": 2,
+        "email": "é😀@acme.test",
+        "name": null
+      },
+      {
+        "id": 4,
+        "email": "d@acme.test",
+        "tags": [
+          "a",
+          "b"
+        ],
+        "address": {
+          "city": "Paris"
+        }
+      },
+      {
+        "id": 6,
+        "email": "f@acme.test",
+        "updated_at": "2026-11-08T12:45:00Z"
+      }
+    ]
+  }
+}
