@@ -1,0 +1,98 @@
+# Checks a TypeScript action as the hub will, one job per version of its matrix.
+# A repository of an action calls it, pinning the kit by commit:
+#   jobs:
+#     check:
+#       uses: cronplane/cronplane-sdk/.github/workflows/action-typescript.yml@<commit>
+#       with: {kit-ref: <the same commit>, cronplane-image: <image>@sha256:…, fixtures: "postgres"}
+# No secret is used or needed; never call it from pull_request_target.
+name: TypeScript action
+
+on:
+  workflow_call:
+    inputs:
+      kit-ref:
+        description: The commit of the kit, the same as in the caller's `uses:`.
+        type: string
+        required: true
+      cronplane-image:
+        description: An image with the cronplane binary at /usr/local/bin/cronplane, pinned by digest.
+        type: string
+        required: true
+      fixtures:
+        description: Profiles of fixtures/compose.yaml to start, separated by spaces.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      versions: ${{ steps.matrix.outputs.versions }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: The cronplane binary
+        env:
+          IMAGE: ${{ inputs.cronplane-image }}
+        run: |
+          id=$(docker create "$IMAGE")
+          docker cp "$id:/usr/local/bin/cronplane" "$RUNNER_TEMP/cronplane"
+          docker rm "$id"
+      - id: matrix
+        name: The versions to test
+        run: |
+          "$RUNNER_TEMP/cronplane" action validate . --hub --json > "$RUNNER_TEMP/report.json" || true
+          echo "versions=$(jq -c '[.matrix[].version]' "$RUNNER_TEMP/report.json")" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(needs.matrix.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: cronplane/cronplane-sdk
+          ref: ${{ inputs.kit-ref }}
+          path: .kit
+          persist-credentials: false
+      # uv, Bun, Syft and grant at the versions of the kit.
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+        with:
+          working_directory: .kit/kit
+      - name: The cronplane binary
+        env:
+          IMAGE: ${{ inputs.cronplane-image }}
+        run: |
+          id=$(docker create "$IMAGE")
+          docker cp "$id:/usr/local/bin/cronplane" "$RUNNER_TEMP/cronplane"
+          docker rm "$id"
+          echo "CRONPLANE_BIN=$RUNNER_TEMP/cronplane" >> "$GITHUB_ENV"
+      - name: Fixtures
+        if: inputs.fixtures != ''
+        env:
+          PROFILES: ${{ inputs.fixtures }}
+        run: |
+          set --
+          for profile in $PROFILES; do set -- "$@" --profile "$profile"; done
+          docker compose -f .kit/kit/fixtures/compose.yaml "$@" up -d --wait
+      - name: Check
+        # Through a variable: a value from the action's repository is never code.
+        env:
+          VERSION: ${{ matrix.version }}
+        run: bun install --cwd .kit/kit/ts --frozen-lockfile && bun .kit/kit/ts/src/cli.ts check . --version "$VERSION" --sbom "$RUNNER_TEMP/sbom.spdx.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.version }}
+          path: ${{ runner.temp }}/sbom.spdx.json
+          if-no-files-found: ignore

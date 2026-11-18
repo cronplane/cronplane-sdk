@@ -1,0 +1,79 @@
+# Publishes the two libraries when a tag `vX.Y.Z` is pushed: `cronplane-actions`
+# on PyPI and `@cronplane/actions` on npm, both at the version of the tag.
+# No secret: each registry trusts this workflow of this repository (trusted
+# publishing, by the OIDC token of the job). On PyPI and on npm, the publisher
+# is this file (`publish.yml`) with the environment of the job.
+name: Publish
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  # The tag and the two libraries carry the same version.
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compare the tag with the version of each library
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python=$(sed -n 's/^version = "\(.*\)"$/\1/p' python/pyproject.toml)
+          typescript=$(jq -r .version typescript/package.json)
+          for found in "$python" "$typescript"; do
+            if [ "v$found" != "$TAG" ]; then
+              echo "::error::the tag is $TAG, a library is at $found"
+              exit 1
+            fi
+          done
+
+  python:
+    needs: [checks, version]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13"
+      - run: uv build
+      - run: uv publish --trusted-publishing always
+
+  typescript:
+    needs: [checks, version]
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11
+      - run: npm publish --access public

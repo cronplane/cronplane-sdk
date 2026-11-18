@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The publication runs every check first.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13"
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run ruff format --check
+      - run: uv run ruff check
+      - run: uv run pyright
+      - run: uv run pytest
+      - name: Audit what an action installs with the library
+        run: uv export --locked --no-emit-project --no-dev --format requirements-txt > requirements.txt && uv run pip-audit --strict -r requirements.txt
+      - name: Say the advisories of the development tools (they never reach an action)
+        run: uv export --locked --no-emit-project --format requirements-txt > requirements-dev.txt && uv run pip-audit --strict -r requirements-dev.txt
+        continue-on-error: true
+
+  typescript:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - name: Say the advisories of the development tools (they never reach an action)
+        run: bun audit
+        continue-on-error: true
+
+  # The older Bun versions the library supports. They cannot read the
+  # bun.lock of Bun 1.4, and they count the functions of a class another
+  # way: the lockfile and the coverage are checked by the job above only.
+  typescript-older-bun:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        bun: ["1.2", "1.3"]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ matrix.bun }}
+      - run: rm bun.lock && bun install
+      - run: bun test
+
+  kit-python:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: kit/python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # uv, Bun, Syft and grant at the versions of kit/mise.toml.
+      - uses: jdx/mise-action@v2
+        with:
+          working_directory: kit
+      - run: uv sync --locked
+      - run: uv run ruff format --check
+      - run: uv run ruff check
+      - run: uv run pyright
+      - run: uv run pytest
+      - name: Audit the locked dependencies
+        run: uv export --locked --no-emit-project --format requirements-txt > requirements.txt && uv run pip-audit --strict -r requirements.txt
+
+  kit-typescript:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: kit/ts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@v2
+        with:
+          working_directory: kit
+      - run: bun install --frozen-lockfile
+      - run: bun run check
