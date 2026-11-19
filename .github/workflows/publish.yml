@@ -76,11 +76,7 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11
-      # npm lets this workflow stage a version, not publish it: the version
-      # is public only after a maintainer approves it on npmjs.com with a
-      # second factor. A version the registry already has is not sent again:
-      # the first one was published by hand, because npm trusts a workflow
-      # only for a package that exists.
+      # Staged only: a maintainer approves the version on npmjs.com.
       - name: Stage the version, unless the registry already has it
         run: |
           version=$(jq -r .version package.json)

@@ -1,0 +1,30 @@
+# A new version waits 7 days, a security fix does not.
+# `kit/templates/` is not watched yet.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directories: ["/python", "/kit/python"]
+    schedule: { interval: weekly, day: monday, time: "07:00", timezone: Europe/Paris }
+    cooldown: { default-days: 7 }
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message: { prefix: build }
+
+  - package-ecosystem: bun
+    directories: ["/typescript", "/kit/ts"]
+    schedule: { interval: weekly, day: monday, time: "07:00", timezone: Europe/Paris }
+    cooldown: { default-days: 7 }
+    groups:
+      typescript:
+        patterns: ["*"]
+    commit-message: { prefix: build }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday, time: "07:00", timezone: Europe/Paris }
+    cooldown: { default-days: 7 }
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message: { prefix: ci }
