@@ -76,4 +76,14 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11
-      - run: npm publish --access public
+      # A version the registry already has is not sent again: the first one
+      # was published by hand, because npm trusts a workflow only for a
+      # package that exists.
+      - name: Publish, unless the registry already has this version
+        run: |
+          version=$(jq -r .version package.json)
+          if npm view "@cronplane/actions@$version" version >/dev/null 2>&1; then
+            echo "::notice::@cronplane/actions@$version is already on npm, nothing is published"
+          else
+            npm publish --access public
+          fi
