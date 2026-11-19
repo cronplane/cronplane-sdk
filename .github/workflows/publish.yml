@@ -70,20 +70,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Trusted publishing needs npm 11.5.1 or newer.
+      # Trusted publishing needs npm 11.5.1, a staged version npm 11.15.0.
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11
-      # A version the registry already has is not sent again: the first one
-      # was published by hand, because npm trusts a workflow only for a
-      # package that exists.
-      - name: Publish, unless the registry already has this version
+      # npm lets this workflow stage a version, not publish it: the version
+      # is public only after a maintainer approves it on npmjs.com with a
+      # second factor. A version the registry already has is not sent again:
+      # the first one was published by hand, because npm trusts a workflow
+      # only for a package that exists.
+      - name: Stage the version, unless the registry already has it
         run: |
           version=$(jq -r .version package.json)
           if npm view "@cronplane/actions@$version" version >/dev/null 2>&1; then
-            echo "::notice::@cronplane/actions@$version is already on npm, nothing is published"
+            echo "::notice::@cronplane/actions@$version is already on npm, nothing is staged"
           else
-            npm publish --access public
+            npm stage publish . --access public
+            echo "::notice::@cronplane/actions@$version is staged, approve it on npmjs.com"
           fi
