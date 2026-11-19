@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/banner.png" alt="Cronplane SDK: write actions in Python and TypeScript" width="640"></p>
+
 # cronplane-sdk
 
 What you need to write an action for [Cronplane](https://github.com/cronplane/cronplane-ce): the libraries, the contract they obey and the checks an action must pass.
