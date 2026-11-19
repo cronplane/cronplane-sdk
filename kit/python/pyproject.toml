@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 # The tools the kit runs on every Python action, at the versions it pins:
 # an action cannot loosen them.
 dependencies = [
-    "ruff==0.17.3",
+    "ruff==0.17.5",
     "pyright==1.1.414",
     "pip-audit==2.10.1",
 ]
