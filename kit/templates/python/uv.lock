@@ -4,8 +4,12 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "cronplane-actions"
-version = "0.1.0"
-source = { git = "ssh://git@github.com/crabisoft/cronplane-actions-python.git?rev=9a8df9a4cec1192d61d65430244123d2ef1b518d#9a8df9a4cec1192d61d65430244123d2ef1b518d" }
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/52/71b68829aa2ae7e489a7aa401b8905a98643252ca71b5c8c4abc21bc89b0/cronplane_actions-0.1.1.tar.gz", hash = "sha256:4af2f3dccf5e460b4d22ee4ce5b7320ac6d6871b17783559bfca446cfbb5a7bc", size = 27314, upload-time = "2026-11-19T20:38:17.122Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/81/8a5c3eab900ebbceb1a2b5159f782217f375b96d4468a6e01daa3ccf1af6/cronplane_actions-0.1.1-py3-none-any.whl", hash = "sha256:167a6ca3b766af40e30be08206f34320d7972436a488bf27bc525ef0bd2968a0", size = 31839, upload-time = "2026-11-19T20:38:16.19Z" },
+]
 
 [[package]]
 name = "my-action"
@@ -16,4 +20,4 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cronplane-actions", git = "ssh://git@github.com/crabisoft/cronplane-actions-python.git?rev=9a8df9a4cec1192d61d65430244123d2ef1b518d" }]
+requires-dist = [{ name = "cronplane-actions", specifier = ">=0.1" }]

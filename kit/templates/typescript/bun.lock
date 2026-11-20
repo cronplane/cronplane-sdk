@@ -5,7 +5,7 @@
     "": {
       "name": "my-action",
       "dependencies": {
-        "@cronplane/actions": "git+ssh://git@github.com/crabisoft/cronplane-actions-ts.git#613b042c58885cfc3eb5acfd2a16d430bd5c07ca",
+        "@cronplane/actions": "^0.1.1",
       },
       "devDependencies": {
         "@types/bun": "1.4.4",
@@ -13,7 +13,7 @@
     },
   },
   "packages": {
-    "@cronplane/actions": ["@cronplane/actions@git+ssh://git@github.com/crabisoft/cronplane-actions-ts.git#613b042c58885cfc3eb5acfd2a16d430bd5c07ca", {}, "613b042c58885cfc3eb5acfd2a16d430bd5c07ca"],
+    "@cronplane/actions": ["@cronplane/actions@0.1.1", "", {}, "sha512-m7seEkfw5VlwhFUT+hflLXFUl+A7yUWcfMUjQdwbrUeQIPnedq/2wmjazypoCW5vkXjj7nCJnB7m2Ckg5btqeg=="],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
 
