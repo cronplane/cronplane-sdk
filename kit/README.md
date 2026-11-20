@@ -16,7 +16,7 @@ The steps run in order. The first failure stops them and shows its output.
 | Step | What it checks |
 |---|---|
 | `validate` | `cronplane action validate --hub --json`: the rules of the hub. Gives the Python versions to test (the matrix). |
-| `lockfile` | `uv.lock` matches `pyproject.toml` (`uv lock --check`). |
+| `lockfile` | Each dependency of `pyproject.toml` has an upper bound (`sqlalchemy>=2.1,<3`), so that a new lock never takes a new major unasked; `uv.lock` matches `pyproject.toml` (`uv lock --check`). |
 | `format`, `lint` | ruff with the kit's rules (`python/src/cronplane_kit/rules/ruff.toml`, security rules `S` included), whatever the action configures. |
 | `types` | pyright, strict, with the action's dependencies, on the newest version of the matrix. |
 | `cronplane` | `requires.cronplane` of `action.yaml` names a Cronplane as new as the one the library installed needs (`REQUIRES_CRONPLANE`). `validate` already requires every hub action to name one. |
@@ -33,7 +33,7 @@ bun ts/src/cli.ts check path/to/action                  # every Bun version of t
 bun ts/src/cli.ts check path/to/action --version 1.4    # one entry of the matrix (a CI job)
 ```
 
-The same steps, for Bun: `lockfile` (`bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `tests` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `flows`. There is no `format` step: no formatter is decided for TypeScript.
+The same steps, for Bun: `lockfile` (each dependency of `package.json` with an upper bound: `^1.2.0`, `~1.2.0`, `>=0.1.1 <1.0.0`; then `bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `tests` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `flows`. There is no `format` step: no formatter is decided for TypeScript.
 
 ## Licences
 

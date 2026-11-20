@@ -2,7 +2,7 @@
 name = "my-action"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["cronplane-actions>=0.1"]
+dependencies = ["cronplane-actions>=0.1,<1"]
 
 [tool.uv]
 package = false

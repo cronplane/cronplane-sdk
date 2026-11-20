@@ -20,4 +20,4 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cronplane-actions", specifier = ">=0.1" }]
+requires-dist = [{ name = "cronplane-actions", specifier = ">=0.1,<1" }]

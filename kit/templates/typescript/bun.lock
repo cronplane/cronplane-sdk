@@ -5,7 +5,7 @@
     "": {
       "name": "my-action",
       "dependencies": {
-        "@cronplane/actions": "^0.1.1",
+        "@cronplane/actions": ">=0.1.1 <1.0.0",
       },
       "devDependencies": {
         "@types/bun": "1.4.4",

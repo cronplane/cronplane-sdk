@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from .bounds import check_bounds
 from .errors import StepError
 from .sources import check_sources
 
@@ -93,6 +94,8 @@ def validate(ctx: Context) -> list[Command]:
 
 
 def lockfile(ctx: Context) -> list[Command]:
+    """The lock matches `pyproject.toml`, whose dependencies each have an upper bound."""
+    check_bounds(ctx.action)
     return [Command(["uv", "lock", "--check"], ctx.action)]
 
 

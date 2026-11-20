@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { StepError } from "./errors.ts";
+import { checkBounds } from "./bounds.ts";
 import { checkSources } from "./sources.ts";
 
 /** The steps, in the order they run; the same as the Python adapter's. */
@@ -83,7 +84,10 @@ export type Build = (ctx: Context) => readonly Command[];
 
 const builds: Readonly<Record<Step, Build>> = {
   validate: (ctx) => [{ argv: [ctx.cronplane, "action", "validate", ctx.action, "--hub", "--json"], cwd: ctx.action }],
-  lockfile: (ctx) => [{ argv: ["bun", "install", "--frozen-lockfile"], cwd: ctx.action }],
+  lockfile: (ctx) => {
+    checkBounds(ctx.action);
+    return [{ argv: ["bun", "install", "--frozen-lockfile"], cwd: ctx.action }];
+  },
   types: (ctx) => [{ argv: [bin(ctx, "tsc"), "--project", tsconfig(ctx)[0]], cwd: ctx.action, writes: [tsconfig(ctx)] }],
   // Asked to the library the lockfile step installed.
   cronplane: (ctx) => [{ argv: ["bun", join(ctx.kit, "ts", "src", "needs.ts"), ctx.action, ctx.requiresCronplane ?? ""], cwd: ctx.action }],
