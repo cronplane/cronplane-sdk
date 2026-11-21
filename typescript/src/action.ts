@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { ActionError, InputError, OutputError, SecretError, StateError } from "./errors.ts";
 import { isMissing, replace } from "./files.ts";
 import { type Address, checkPublic, Egress, HttpClient, parseEgress, type Resolve, systemResolve } from "./http.ts";
+import { SmtpClient } from "./smtp.ts";
 import { isObject, type JsonValue, parse } from "./json.ts";
 import { AllowedHosts } from "./network.ts";
 import { State } from "./state.ts";
@@ -161,6 +162,7 @@ export class Action {
     readonly inputs: Inputs,
     readonly outputs: Outputs,
     readonly http: HttpClient,
+    readonly smtp: SmtpClient,
     readonly network: Network,
     private readonly environment: ReadonlyMap<string, string>,
   ) {}
@@ -178,10 +180,12 @@ export class Action {
     path(env, "CRONPLANE_MASK");
     const egress = parseEgress(env.get("CRONPLANE_EGRESS"));
     const allowed = AllowedHosts.parse(env.get("CRONPLANE_NETWORK_ALLOW"));
+    const plain = AllowedHosts.parse(env.get("CRONPLANE_NETWORK_PLAIN"));
     return new Action(
       new Inputs(new Map(Object.entries(values))),
       new Outputs(path(env, "CRONPLANE_OUTPUT")),
-      new HttpClient(egress, { allowed }),
+      new HttpClient(egress, { allowed, plain }),
+      new SmtpClient(egress, { allowed, plain }),
       new Network(egress, allowed),
       env,
     );

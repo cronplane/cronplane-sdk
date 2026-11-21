@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, TypeAlias
 
@@ -119,3 +120,26 @@ class AllowedHosts:
                 f"{host}:{port} is not one of the hosts this step may reach "
                 f"({', '.join(self.lines)}): see network.allow of the action and of the step"
             )
+
+
+def is_loopback(address: IpAddress) -> bool:
+    """An address of this machine; an IPv6 address carrying an IPv4 one is judged on it."""
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
+
+
+def check_plain(
+    host: str, port: int, addresses: Sequence[IpAddress], plain: AllowedHosts | None
+) -> None:
+    """`EgressError` unless what goes to `host` in clear stays on this machine (every
+    address of `addresses`), or the step names the host in `network.plain`
+    (`CRONPLANE_NETWORK_PLAIN`)."""
+    if all(is_loopback(address) for address in addresses):
+        return
+    if plain is not None and plain.allows(host, port):
+        return
+    raise EgressError(
+        f"{host}:{port} is reached in clear: what leaves this machine is encrypted (https, "
+        "STARTTLS), unless the step names the host in network.plain"
+    )

@@ -5,7 +5,7 @@
  * limited: a defence for honest code, not a confinement.
  */
 
-import { canonical, type Canonical } from "./address.ts";
+import { canonical, type Canonical, isLoopback } from "./address.ts";
 import { ActionError, EgressError } from "./errors.ts";
 
 // eslint-disable-next-line security/detect-unsafe-regex -- the repetition is bounded (61): the time is linear in the label
@@ -137,5 +137,33 @@ export class AllowedHosts {
         `${host}:${String(port)} is not one of the hosts this step may reach (${this.lines.join(", ")}): see network.allow of the action and of the step`,
       );
     }
+  }
+}
+
+/**
+ * Whether what goes to `host` in clear is allowed: it stays on this machine
+ * (every address of `addresses`), or the step names the host in
+ * `network.plain` (`CRONPLANE_NETWORK_PLAIN`).
+ */
+export function clearAllowed(
+  host: string,
+  port: number,
+  addresses: readonly string[],
+  plain: AllowedHosts | undefined,
+): boolean {
+  return addresses.every(isLoopback) || plain?.allows(host, port) === true;
+}
+
+/** `EgressError` unless what goes to `host` in clear is allowed. */
+export function checkPlain(
+  host: string,
+  port: number,
+  addresses: readonly string[],
+  plain: AllowedHosts | undefined,
+): void {
+  if (!clearAllowed(host, port, addresses, plain)) {
+    throw new EgressError(
+      `${host}:${String(port)} is reached in clear: what leaves this machine is encrypted (https, STARTTLS), unless the step names the host in network.plain`,
+    );
   }
 }

@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
-import { ActionError, AllowedHosts, Egress, EgressError, HttpClient, Network } from "../src/index.ts";
+import { ActionError, AllowedHosts, Egress, EgressError, HttpClient, isLoopback, Network } from "../src/index.ts";
 import { Case, rejects, resolver, Server, Step, toLocal } from "./helpers.ts";
 
 const CASES = Case.of("network");
@@ -129,6 +129,7 @@ describe("the HTTP client", () => {
     const resolved: string[] = [];
     const client = new HttpClient(Egress.Any, {
       allowed: allow(`api.test:${String(server.port)}`),
+      plain: allow("api.test"),
       resolve: (host) => {
         resolved.push(host);
         return resolver(names)(host);
@@ -146,7 +147,12 @@ describe("the HTTP client", () => {
 
   test("a redirect to a host out of the list is refused", async () => {
     server.routes.set("/start", [302, { location: `http://evil.test:${String(server.port)}/take` }, ""]);
-    const client = new HttpClient(Egress.Any, { allowed: allow("api.test"), resolve: resolver(names), dial: toLocal([]) });
+    const client = new HttpClient(Egress.Any, {
+      allowed: allow("api.test"),
+      plain: allow("api.test"),
+      resolve: resolver(names),
+      dial: toLocal([]),
+    });
     await rejects(client.get(server.url("/start", "api.test")), /^evil\.test:\d+ is not one of/);
     expect(server.seen.map((seen) => seen.path)).toEqual(["/start"]);
   });
@@ -186,4 +192,68 @@ test("a connection goes to addresses checked for the list and the worker", async
   const open = new Network(Egress.Public, undefined, resolver({ "api.test": ["1.1.1.1", "2606:4700::1111"] }));
   expect((await open.resolve("api.test", 443)).map(({ address }) => address)).toEqual(["1.1.1.1", "2606:4700::1111"]);
   expect(await new Network(Egress.Any, undefined).resolve("127.0.0.1", 80)).toEqual([{ address: "127.0.0.1", family: 4 }]);
+});
+
+describe("what goes in clear", () => {
+  let server: Server;
+  beforeEach(async () => {
+    server = await Server.start();
+  });
+  afterEach(() => server.stop());
+
+  test.each(["127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1"])("%s is of this machine", (address) => {
+    expect(isLoopback(address)).toBe(true);
+  });
+
+  test.each(["10.0.0.1", "1.1.1.1", "169.254.169.254", "::ffff:10.0.0.1", "::2", "localhost"])(
+    "%s is not of this machine",
+    (address) => {
+      expect(isLoopback(address)).toBe(false);
+    },
+  );
+
+  test("the HTTP client sends nothing in clear out of this machine", async () => {
+    server.routes.set("/item", [200, {}, "ok"]);
+    const attempts: string[] = [];
+    const client = new HttpClient(Egress.Any, {
+      resolve: resolver({ "api.test": ["1.1.1.1"], "mixed.test": ["127.0.0.1", "1.1.1.1"], "local.test": ["127.0.0.1"] }),
+      dial: toLocal(attempts),
+    });
+    for (const host of ["api.test", "mixed.test"]) {
+      await rejects(client.get(server.url("/item", host)), new EgressError(
+        `${host}:${String(server.port)} is reached in clear: what leaves this machine is encrypted (https, STARTTLS), unless the step names the host in network.plain`,
+      ));
+    }
+    expect(attempts).toEqual([]);
+    expect((await client.get(server.url("/item", "local.test"))).text()).toBe("ok");
+    expect((await new HttpClient(Egress.Any).get(server.url("/item"))).text()).toBe("ok");
+  });
+
+  test("a step names the hosts it reaches in clear", async () => {
+    server.routes.set("/item", [200, {}, "ok"]);
+    const attempts: string[] = [];
+    const client = new HttpClient(Egress.Any, {
+      plain: allow(`api.test:${String(server.port)}`),
+      resolve: resolver({ "api.test": ["1.1.1.1"], "other.test": ["2.2.2.2"] }),
+      dial: toLocal(attempts),
+    });
+    expect((await client.get(server.url("/item", "api.test"))).text()).toBe("ok");
+    await rejects(client.get(server.url("/item", "other.test")), /^other\.test:\d+ is reached in clear/);
+    await rejects(client.get("http://api.test/item"), /^api\.test:80 is reached in clear/);
+    expect(attempts).toEqual(["1.1.1.1"]);
+  });
+
+  test("the hosts in clear of the step reach the HTTP and SMTP clients", () => {
+    const step = new Step();
+    let action = step.action();
+    expect([action.http.plain, action.smtp.plain, action.smtp.allowed]).toEqual([undefined, undefined, undefined]);
+    step.env["CRONPLANE_NETWORK_ALLOW"] = "relay.internal:25\napi.hubapi.com";
+    step.env["CRONPLANE_NETWORK_PLAIN"] = "relay.internal:25";
+    action = step.action();
+    expect(action.http.plain?.lines).toEqual(["relay.internal:25"]);
+    expect(action.smtp.plain).toBe(action.http.plain);
+    expect(action.smtp.allowed).toBe(action.http.allowed);
+    step.env["CRONPLANE_NETWORK_PLAIN"] = "Not A Host";
+    expect(() => step.action()).toThrow(/host "Not A Host"/);
+  });
 });

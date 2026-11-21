@@ -23,8 +23,10 @@ class SecretError(ActionError):
 
 
 class EgressError(ActionError):
-    """An address the worker forbids its steps to reach (`CRONPLANE_EGRESS=public`), or
-    a host out of those the step may reach (`CRONPLANE_NETWORK_ALLOW`)."""
+    """An address the worker forbids its steps to reach (`CRONPLANE_EGRESS=public`), a
+    host out of those the step may reach (`CRONPLANE_NETWORK_ALLOW`), or a host reached
+    in clear that is neither this machine nor one the step names
+    (`CRONPLANE_NETWORK_PLAIN`)."""
 
 
 class StreamError(ActionError):
@@ -39,6 +41,11 @@ class RejectedError(ActionError):
 class StateError(ActionError):
     """The state of the step cannot be read or written: not JSON, over 32 KiB, or
     not kept for this action (`state: true`)."""
+
+
+class SmtpError(ActionError):
+    """A message was not sent: invalid URL or message, connection, TLS, or a refusal
+    of the server."""
 
 
 class HttpError(ActionError):

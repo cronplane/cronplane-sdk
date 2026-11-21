@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createServer as createTcpServer } from "node:net";
 
-import { Egress, EgressError, HttpClient, HttpError, isPublic } from "../src/index.ts";
+import { AllowedHosts, Egress, EgressError, HttpClient, HttpError, isPublic } from "../src/index.ts";
 import { followRedirect, lookupOf } from "../src/http.ts";
 import { rejects, resolver, Server, toLocal } from "./helpers.ts";
 
@@ -80,6 +80,7 @@ describe("requests", () => {
     server.routes.set("/start", [302, { location: "http://metadata.test/latest/" }, ""]);
     const attempts: string[] = [];
     const client = new HttpClient(Egress.Public, {
+      plain: AllowedHosts.parse("api.test"),
       resolve: resolver({ "api.test": ["1.1.1.1"], "metadata.test": ["169.254.169.254"] }),
       dial: toLocal(attempts),
     });

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from cronplane_actions import (
     JsonValue,
     Network,
 )
+from cronplane_actions._network import is_loopback
 
 from .conftest import Server, Step
 from .test_http import resolver, to_local
@@ -94,6 +96,7 @@ def test_the_http_client_refuses_a_host_out_of_the_list_before_resolving(server:
     client = HttpClient(
         Egress.ANY,
         _allow(f"api.test:{server.port}"),
+        plain=_allow("api.test"),
         resolve=resolver({"api.test": ["1.1.1.1"], "evil.test": ["2.2.2.2"]}),
         connect=to_local(server, attempts),
     )
@@ -111,6 +114,7 @@ def test_a_redirect_to_a_host_out_of_the_list_is_refused(server: Server) -> None
     client = HttpClient(
         Egress.ANY,
         _allow("api.test"),
+        plain=_allow("api.test"),
         resolve=resolver({"api.test": ["1.1.1.1"], "evil.test": ["2.2.2.2"]}),
         connect=to_local(server, attempts),
     )
@@ -145,3 +149,60 @@ def test_a_connection_goes_to_addresses_checked_for_the_list_and_the_worker() ->
     assert Network(Egress.ANY, None, resolver(names)).resolve("db.public.test", 5432)
     public = Network(Egress.PUBLIC, None, resolver({"api.test": ["1.1.1.1", "2606:4700::1111"]}))
     assert [str(a) for a in public.resolve("api.test", 443)] == ["1.1.1.1", "2606:4700::1111"]
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "127.8.9.10", "::1", "::ffff:127.0.0.1"])
+def test_an_address_of_this_machine_is_loopback(address: str) -> None:
+    assert is_loopback(ipaddress.ip_address(address))
+
+
+@pytest.mark.parametrize("address", ["10.0.0.1", "1.1.1.1", "169.254.169.254", "::ffff:10.0.0.1"])
+def test_an_address_of_another_machine_is_not_loopback(address: str) -> None:
+    assert not is_loopback(ipaddress.ip_address(address))
+
+
+def test_the_http_client_sends_nothing_in_clear_out_of_this_machine(server: Server) -> None:
+    server.routes["/item"] = (200, {}, b"ok")
+    attempts: list[str] = []
+    names = {"api.test": ["1.1.1.1"], "mixed.test": ["127.0.0.1", "1.1.1.1"], "local.test": ["::1"]}
+    client = HttpClient(Egress.ANY, resolve=resolver(names), connect=to_local(server, attempts))
+    for host in ("api.test", "mixed.test"):
+        with pytest.raises(
+            EgressError, match=re.escape(f"{host}:{server.port} is reached in clear")
+        ):
+            client.get(server.url("/item", host=host))
+    assert attempts == [], "nothing connected for a host refused"
+    assert client.get(server.url("/item", host="local.test")).body == b"ok"
+    assert HttpClient(Egress.ANY).get(server.url("/item")).body == b"ok"
+
+
+def test_a_step_names_the_hosts_it_reaches_in_clear(server: Server) -> None:
+    server.routes["/item"] = (200, {}, b"ok")
+    attempts: list[str] = []
+    client = HttpClient(
+        Egress.ANY,
+        plain=_allow(f"api.test:{server.port}"),
+        resolve=resolver({"api.test": ["1.1.1.1"], "other.test": ["2.2.2.2"]}),
+        connect=to_local(server, attempts),
+    )
+    assert client.get(server.url("/item", host="api.test")).body == b"ok"
+    with pytest.raises(EgressError, match=re.escape("other.test")):
+        client.get(server.url("/item", host="other.test"))
+    with pytest.raises(EgressError, match=re.escape("api.test:80 is reached in clear")):
+        client.get("http://api.test/item")
+    assert attempts == ["1.1.1.1"]
+
+
+def test_the_hosts_in_clear_of_the_step_reach_the_http_and_smtp_clients(step: Step) -> None:
+    action = step.action()
+    assert (action.http.plain, action.smtp.plain, action.smtp.allowed) == (None, None, None)
+    step.env["CRONPLANE_NETWORK_ALLOW"] = "relay.internal:25\napi.hubapi.com"
+    step.env["CRONPLANE_NETWORK_PLAIN"] = "relay.internal:25"
+    action = step.action()
+    assert action.http.plain is not None
+    assert action.http.plain.lines == ("relay.internal:25",)
+    assert action.smtp.plain == action.http.plain
+    assert action.smtp.allowed == action.http.allowed
+    step.env["CRONPLANE_NETWORK_PLAIN"] = "Not A Host"
+    with pytest.raises(ActionError, match="host 'Not A Host'"):
+        step.action()

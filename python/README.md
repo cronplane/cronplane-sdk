@@ -27,6 +27,7 @@ action.outputs.set("count", len(hosts))
 | `action.mask(value)` | Hides a value the step gets while it runs (a token, a password it makes) in its log, error and output (`$CRONPLANE_MASK`). Call it before the value can be printed. Values shorter than 3 characters and encoded forms (base64, URL) are not masked. |
 | `action.needed()`, `action.trigger()` | The outputs of the steps it needs; what started the run (`needs_trigger: true`). |
 | `action.http` | An HTTP/1.1 client: `get`, `post`, `post_json`, `request`. |
+| `action.smtp` | An SMTP client: `send` one message, text and optional HTML. |
 | `action.streams.writer(stream, schema, …)`, `.reader(name)` | The streams of records the action produces and consumes (`streams:` of `action.yaml`). |
 | `action.state` | Where the step starts again at its next run (`state: true`): `get`, `set`, `stream`, `set_stream`. |
 | `action.network.resolve(host, port)` | The checked addresses of a host, for a connection the HTTP client does not make (a database). |
@@ -91,6 +92,27 @@ On a worker started with `--egress public` (a machine that runs the steps of sev
 The guard is a defence in depth with a clear message. The network rules of the worker are what forbids those addresses.
 
 Without `CRONPLANE_EGRESS` (your own workers), every address is allowed.
+
+## Encryption
+
+What leaves the machine of the step is encrypted. `action.http` sends an `http://` request to this machine only (`127.0.0.1`, `::1`): to any other address it raises `EgressError` before it connects. `action.smtp` sends a message through `smtps://`, or through `smtp://` with STARTTLS, which the server must offer.
+
+A step names the hosts it reaches in clear, an internal relay for example: `network: {allow: [...], plain: ["relay.internal:25"]}`. The step gets them in `CRONPLANE_NETWORK_PLAIN`. An action cannot write `plain`.
+
+## Mail
+
+```python
+action.smtp.send(
+    action.secret("SMTP_URL"),  # smtp://user:password@smtp.example.com:587
+    sender="flows@example.com",
+    to=["ops@example.com"],
+    subject="The export is done",
+    text="42 rows.",
+    html="<p><b>42</b> rows.</p>",  # optional
+)
+```
+
+The URL is `smtp://` (port 587, STARTTLS) or `smtps://` (port 465, TLS from the first byte), with the user and the password when the server asks for them. The hosts of `network.allow` and the rule of `--egress public` apply as for HTTP. A failure is an `SmtpError`. A message has no attachment.
 
 ## Development
 

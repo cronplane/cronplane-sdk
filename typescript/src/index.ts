@@ -11,7 +11,7 @@
  */
 
 export { Action, type Environment, Inputs, MAX_OUTPUT_BYTES, Network, Outputs, type Scalar } from "./action.ts";
-export { isPublic } from "./address.ts";
+export { isLoopback, isPublic } from "./address.ts";
 export {
   ActionError,
   EgressError,
@@ -21,6 +21,7 @@ export {
   RejectedError,
   SchemaError,
   SecretError,
+  SmtpError,
   StateError,
   StreamError,
   VersionError,
@@ -29,6 +30,7 @@ export { type Address, Egress, HttpClient, type HttpOptions, type Resolve, Respo
 export type { JsonValue } from "./json.ts";
 export { AllowedHosts } from "./network.ts";
 export { Problem, RecordSchema } from "./schema.ts";
+export { type Message, SmtpClient, type SmtpOptions } from "./smtp.ts";
 export { MAX_STATE_BYTES, State } from "./state.ts";
 export {
   type Closing,

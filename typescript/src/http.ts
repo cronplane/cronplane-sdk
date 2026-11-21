@@ -10,7 +10,8 @@
  * to is checked, and the connection goes to an address checked (the
  * request's `lookup` gives it), so a second resolution cannot change it
  * (DNS rebinding). Each redirect is checked the same way. TLS is verified
- * against the name of the URL.
+ * against the name of the URL. An `http` URL goes to this machine only, or
+ * to a host the step names in `network.plain`.
  */
 
 import { lookup as dnsLookup } from "node:dns/promises";
@@ -22,7 +23,7 @@ import type { LookupFunction } from "node:net";
 import { isPublic } from "./address.ts";
 import { ActionError, EgressError, HttpError } from "./errors.ts";
 import { type JsonValue, parse } from "./json.ts";
-import type { AllowedHosts } from "./network.ts";
+import { type AllowedHosts, checkPlain } from "./network.ts";
 
 /** The addresses the worker lets its steps reach. */
 export const Egress = { Any: "any", Public: "public" } as const;
@@ -97,6 +98,8 @@ export class Response {
 export interface HttpOptions {
   /** The only hosts the step reaches; undefined: any host. */
   readonly allowed?: AllowedHosts | undefined;
+  /** The hosts the step reaches in clear, beside this machine. */
+  readonly plain?: AllowedHosts | undefined;
   /** Per connection and read, in milliseconds. */
   readonly timeout?: number;
   readonly maxBody?: number;
@@ -130,6 +133,8 @@ const CREDENTIALS: ReadonlySet<string> = new Set(["authorization", "proxy-author
 export class HttpClient {
   /** The only hosts the step reaches; undefined: any host. */
   readonly allowed: AllowedHosts | undefined;
+  /** The hosts the step reaches in clear, beside this machine. */
+  readonly plain: AllowedHosts | undefined;
   readonly timeout: number;
   readonly maxBody: number;
   readonly maxRedirects: number;
@@ -142,6 +147,7 @@ export class HttpClient {
     options: HttpOptions = {},
   ) {
     this.allowed = options.allowed;
+    this.plain = options.plain;
     this.timeout = options.timeout ?? 30_000;
     this.maxBody = options.maxBody ?? 10 << 20;
     this.maxRedirects = options.maxRedirects ?? 5;
@@ -184,13 +190,17 @@ export class HttpClient {
   private async send(request: Request): Promise<Response> {
     const target = parseTarget(request.url);
     const host = target.hostname.replace(/^\[(.*)\]$/, "$1");
-    this.allowed?.check(host, target.port === "" ? defaultPort(target) : Number(target.port));
+    const port = target.port === "" ? defaultPort(target) : Number(target.port);
+    this.allowed?.check(host, port);
     const addresses = await this.resolve(host);
     if (addresses.length === 0) {
       throw new HttpError(`${host}: the name resolves to no address`);
     }
     if (this.egress === Egress.Public) {
       checkPublic(host, addresses);
+    }
+    if (target.protocol !== "https:") {
+      checkPlain(host, port, addresses.map(({ address }) => address), this.plain);
     }
     // The connection goes to the addresses checked: no second resolution.
     const lookup = lookupOf(host, addresses.map((address) => this.dial(address)));

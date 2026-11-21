@@ -17,6 +17,7 @@ from ._errors import ActionError, EgressError, InputError, OutputError, SecretEr
 from ._http import Egress, HttpClient, Resolve, is_public, system_resolve
 from ._json import JsonValue, parse
 from ._network import AllowedHosts, IpAddress
+from ._smtp import SmtpClient
 from ._state import State
 from ._streams import Streams
 from ._version import REQUIRES_CRONPLANE, VARIABLE, Minor, check
@@ -140,6 +141,7 @@ class Action:
     inputs: Inputs
     outputs: Outputs
     http: HttpClient
+    smtp: SmtpClient
     network: Network
     environ: Mapping[str, str] = field(repr=False)
 
@@ -159,10 +161,12 @@ class Action:
         _path(env, "CRONPLANE_MASK")
         egress = Egress.parse(env.get("CRONPLANE_EGRESS"))
         allowed = AllowedHosts.parse(env.get("CRONPLANE_NETWORK_ALLOW"))
+        plain = AllowedHosts.parse(env.get("CRONPLANE_NETWORK_PLAIN"))
         return cls(
             inputs=Inputs(values),
             outputs=Outputs(_path(env, "CRONPLANE_OUTPUT")),
-            http=HttpClient(egress, allowed),
+            http=HttpClient(egress, allowed, plain),
+            smtp=SmtpClient(egress, allowed, plain),
             network=Network(egress, allowed),
             environ=env,
         )

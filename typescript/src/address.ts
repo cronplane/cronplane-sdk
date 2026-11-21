@@ -61,6 +61,23 @@ export function isPublic(address: string): boolean {
   return within(value, 128, GLOBAL_UNICAST, ipv6) && !IPV6_RANGES.some((range) => within(value, 128, range, ipv6));
 }
 
+const LOOPBACK_V4: Range = ["127.0.0.0", 8];
+
+/**
+ * Whether `address` (IPv4 or IPv6, as text) is of this machine; an IPv6
+ * address carrying an IPv4 one is judged on it. Any other text is not.
+ */
+export function isLoopback(address: string): boolean {
+  if (isIPv4(address)) {
+    return within(ipv4(address), 32, LOOPBACK_V4, ipv4);
+  }
+  if (!isIPv6(address)) {
+    return false;
+  }
+  const value = ipv6(address.split("%")[0] ?? "");
+  return within(value, 128, MAPPED, ipv6) ? isLoopback(fromIpv4(value & 0xffff_ffffn)) : value === 1n;
+}
+
 /** An address in one writing: every writing of the same address gives the same text. */
 export interface Canonical {
   readonly family: 4 | 6;

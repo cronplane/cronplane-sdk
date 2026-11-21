@@ -20,6 +20,7 @@ from ._errors import (
     RejectedError,
     SchemaError,
     SecretError,
+    SmtpError,
     StateError,
     StreamError,
     VersionError,
@@ -28,6 +29,7 @@ from ._http import Egress, HttpClient, Response, is_public
 from ._json import JsonValue
 from ._network import AllowedHosts
 from ._schema import Problem, RecordSchema
+from ._smtp import SmtpClient
 from ._state import MAX_STATE_BYTES, State
 from ._streams import StreamReader, Streams, StreamWriter
 from ._version import REQUIRES_CRONPLANE
@@ -56,6 +58,8 @@ __all__ = [
     "Scalar",
     "SchemaError",
     "SecretError",
+    "SmtpClient",
+    "SmtpError",
     "State",
     "StateError",
     "StreamError",

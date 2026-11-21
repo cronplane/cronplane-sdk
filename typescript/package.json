@@ -1,6 +1,6 @@
 {
   "name": "@cronplane/actions",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Write Cronplane actions in TypeScript for Bun: typed inputs, outputs, secrets, masked values and an HTTP client that guards against SSRF.",
   "license": "Apache-2.0",
   "repository": {

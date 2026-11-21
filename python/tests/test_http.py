@@ -9,7 +9,14 @@ from collections.abc import Sequence
 
 import pytest
 
-from cronplane_actions import Egress, EgressError, HttpClient, HttpError, is_public
+from cronplane_actions import (
+    AllowedHosts,
+    Egress,
+    EgressError,
+    HttpClient,
+    HttpError,
+    is_public,
+)
 from cronplane_actions._http import IpAddress, Request, follow_redirect
 
 from .conftest import Server
@@ -96,6 +103,7 @@ def test_a_redirect_to_the_metadata_address_is_checked_again(server: Server) -> 
     attempts: list[str] = []
     client = HttpClient(
         Egress.PUBLIC,
+        plain=AllowedHosts.parse("api.test"),
         resolve=resolver({"api.test": ["1.1.1.1"], "metadata.test": ["169.254.169.254"]}),
         connect=to_local(server, attempts),
     )

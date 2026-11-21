@@ -5,7 +5,8 @@ On a worker that runs the steps of several customers
 before it connects: the name is resolved once, every address it resolves to
 is checked, and the connection goes to an address checked, so a second
 resolution cannot change it (DNS rebinding). Each redirect is checked the
-same way. TLS is verified against the name of the URL.
+same way. TLS is verified against the name of the URL. An `http` URL goes to this
+machine only, or to a host the step names in `network.plain`.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from urllib.parse import SplitResult, urljoin, urlsplit, urlunsplit
 
 from ._errors import ActionError, EgressError, HttpError
 from ._json import JsonValue, parse
-from ._network import AllowedHosts, IpAddress
+from ._network import AllowedHosts, IpAddress, check_plain
 
 Resolve: TypeAlias = Callable[[str, int], Sequence[IpAddress]]
 """The addresses of a host name, for a port."""
@@ -132,6 +133,8 @@ class HttpClient:
     egress: Egress
     #: The only hosts the step reaches; `None`: any host.
     allowed: AllowedHosts | None = None
+    #: The hosts the step reaches in clear, beside this machine.
+    plain: AllowedHosts | None = None
     timeout: float = 30.0
     max_body: int = 10 << 20
     max_redirects: int = 5
@@ -186,6 +189,8 @@ class HttpClient:
                         f"{host} resolves to {address}, not a public address: this worker "
                         "lets its steps reach public addresses only"
                     )
+        if parts.scheme != "https":
+            check_plain(host, port, addresses, self.plain)
         sock = self._open(addresses, host, port, parts.scheme)
         connection = (
             http.client.HTTPSConnection(host, port, timeout=self.timeout)

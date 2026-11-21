@@ -26,8 +26,10 @@ export class SecretError extends ActionError {
 }
 
 /**
- * An address the worker forbids its steps to reach (`CRONPLANE_EGRESS=public`), or
- * a host out of those the step may reach (`CRONPLANE_NETWORK_ALLOW`).
+ * An address the worker forbids its steps to reach (`CRONPLANE_EGRESS=public`), a
+ * host out of those the step may reach (`CRONPLANE_NETWORK_ALLOW`), or a host
+ * reached in clear that is neither this machine nor one the step names
+ * (`CRONPLANE_NETWORK_PLAIN`).
  */
 export class EgressError extends ActionError {
   override name = "EgressError";
@@ -52,6 +54,11 @@ export class RejectedError extends ActionError {
  */
 export class StateError extends ActionError {
   override name = "StateError";
+}
+
+/** A message was not sent: invalid URL or message, connection, TLS, or a refusal of the server. */
+export class SmtpError extends ActionError {
+  override name = "SmtpError";
 }
 
 /** An HTTP request failed: invalid URL, connection, TLS, redirect or response too large. */
