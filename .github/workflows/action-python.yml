@@ -55,6 +55,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every tag: the version before is found from them.
+          fetch-depth: 0
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: cronplane/cronplane-sdk
@@ -77,7 +79,11 @@ jobs:
         # Through a variable: a value from the action's repository is never code.
         env:
           VERSION: ${{ matrix.version }}
-        run: uv run --project .kit/kit/python cronplane-kit check . --version "$VERSION" --sbom "$RUNNER_TEMP/sbom.spdx.json"
+        # The version before is the highest tag vX.Y.Z under the commit checked.
+        run: |
+          .kit/kit/previous.sh . "$RUNNER_TEMP/previous" > "$RUNNER_TEMP/previous.args"
+          mapfile -t before < "$RUNNER_TEMP/previous.args"
+          uv run --project .kit/kit/python cronplane-kit check . --version "$VERSION" --sbom "$RUNNER_TEMP/sbom.spdx.json" "${before[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
