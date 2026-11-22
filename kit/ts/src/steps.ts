@@ -13,7 +13,7 @@ import { flowsOf, type Level, type Plan, variables } from "./plan.ts";
 import { checkSources } from "./sources.ts";
 
 /** The steps, in the order they run; the same as the Python adapter's. */
-export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "unit", "audit", "licences", "e2e", "integration"] as const;
+export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "unit", "audit", "licences", "e2e", "integration", "regression"] as const;
 export type Step = (typeof STEPS)[number];
 
 /** A program and its arguments (never a shell line), its directory, the variables added. */
@@ -36,6 +36,28 @@ export interface Command {
 export const SERVICES = ["start", "running"] as const;
 export type Services = (typeof SERVICES)[number];
 
+/** The version before of the action. */
+export interface Previous {
+  /** Its folder, with its `tests/`. */
+  readonly folder: string;
+  /** Its number (`X.Y.Z`), when it is known. */
+  readonly number?: string;
+  /** The number of the version checked, when it has one. */
+  readonly nextNumber?: string;
+  /** Its test flows that run against the version checked. */
+  readonly plan: Plan;
+}
+
+/** What tells `cronplane` the version before and the numbers that are known. */
+export function before(previous: Previous): readonly string[] {
+  return [
+    "--previous",
+    previous.folder,
+    ...(previous.number === undefined ? [] : ["--from", previous.number]),
+    ...(previous.nextNumber === undefined ? [] : ["--to", previous.nextNumber]),
+  ];
+}
+
 export function show(command: Command): string {
   return command.argv.join(" ");
 }
@@ -56,6 +78,8 @@ export interface Context {
   /** Its test flows (from `cronplane test --plan`). */
   readonly plan: Plan;
   readonly services: Services;
+  /** The version before, for the regression step; none: the step runs nothing. */
+  readonly previous?: Previous;
 }
 
 export { StepError } from "./errors.ts";
@@ -214,6 +238,31 @@ const builds: Readonly<Record<Step, Build>> = {
     return [
       { argv: [...compose, "up", "-d", "--wait", ...ctx.plan.services], cwd: ctx.action },
       ...flows,
+      { argv: [...compose, "down", "-v"], cwd: ctx.action, when: "always" },
+    ];
+  },
+  // The contracts first: a number too low for their changes stops before any flow runs.
+  regression: (ctx) => {
+    const previous = ctx.previous;
+    if (previous === undefined) {
+      return [];
+    }
+    const compare: Command = { argv: [ctx.cronplane, "action", "compare", ctx.action, ...before(previous)], cwd: ctx.action };
+    if (previous.plan.flows.length === 0) {
+      return [compare];
+    }
+    const flows: Command = {
+      argv: [ctx.cronplane, "test", ctx.action, ...before(previous), "--runs-dir", join(ctx.work, "runs")],
+      cwd: ctx.action,
+    };
+    if (ctx.services === "running" || previous.plan.services.length === 0) {
+      return [compare, flows];
+    }
+    const compose = ["docker", "compose", "-f", join(previous.folder, "tests", "compose.yaml")];
+    return [
+      compare,
+      { argv: [...compose, "up", "-d", "--wait", ...previous.plan.services], cwd: ctx.action },
+      flows,
       { argv: [...compose, "down", "-v"], cwd: ctx.action, when: "always" },
     ];
   },

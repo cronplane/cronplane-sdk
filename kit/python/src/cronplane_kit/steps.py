@@ -40,6 +40,7 @@ class Step(StrEnum):
     LICENCES = "licences"
     E2E = "e2e"
     INTEGRATION = "integration"
+    REGRESSION = "regression"
 
 
 class OnFailure(StrEnum):
@@ -89,6 +90,25 @@ class Command:
 
 
 @dataclass(frozen=True)
+class Previous:
+    """The version before of the action."""
+
+    #: Its folder, with its `tests/`.
+    folder: Path
+    #: Its number (`X.Y.Z`), when it is known.
+    number: str | None = None
+    #: The number of the version checked, when it has one.
+    next_number: str | None = None
+    #: Its test flows that run against the version checked.
+    plan: Plan = NO_PLAN
+
+    def numbers(self) -> list[str]:
+        """What tells `cronplane` the numbers that are known."""
+        given = [("--from", self.number), ("--to", self.next_number)]
+        return [word for flag, number in given if number is not None for word in (flag, number)]
+
+
+@dataclass(frozen=True)
 class Context:
     """What the commands of one action need."""
 
@@ -106,6 +126,8 @@ class Context:
     #: Its test flows (from `cronplane test --plan`); none before it is read.
     plan: Plan = NO_PLAN
     services: Services = Services.START
+    #: The version before, for the regression step; none: the step runs nothing.
+    previous: Previous | None = None
 
 
 def tool(name: str, *args: str) -> list[str]:
@@ -353,6 +375,36 @@ def integration(ctx: Context) -> list[Command]:
     return commands
 
 
+def regression(ctx: Context) -> list[Command]:
+    """Against the version before: `cronplane action compare` lists what the
+    contract changes and refuses a number too low for it, then the test
+    flows of the version before run against the action, with the services
+    of its own `tests/compose.yaml`."""
+    previous = ctx.previous
+    if previous is None:
+        return []
+    binary, action, before = str(ctx.cronplane), str(ctx.action), str(previous.folder)
+    numbers = previous.numbers()
+    commands = [
+        Command([binary, "action", "compare", action, "--previous", before, *numbers], ctx.action)
+    ]
+    if not previous.plan.flows:
+        return commands
+    compose = ["docker", "compose", "-f", str(previous.folder / "tests" / "compose.yaml")]
+    started = ctx.services is Services.START and bool(previous.plan.services)
+    if started:
+        commands.append(
+            Command([*compose, "up", "-d", "--wait", *previous.plan.services], ctx.action)
+        )
+    runs = ["--runs-dir", str(ctx.work / "runs")]
+    commands.append(
+        Command([binary, "test", action, "--previous", before, *numbers, *runs], ctx.action)
+    )
+    if started:
+        commands.append(Command([*compose, "down", "-v"], ctx.action, when=When.ALWAYS))
+    return commands
+
+
 STEPS = {
     Step.VALIDATE: validate,
     Step.LOCKFILE: lockfile,
@@ -365,6 +417,7 @@ STEPS = {
     Step.LICENCES: licences,
     Step.E2E: e2e,
     Step.INTEGRATION: integration,
+    Step.REGRESSION: regression,
 }
 
 

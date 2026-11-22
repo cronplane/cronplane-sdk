@@ -8,18 +8,26 @@ import pytest
 
 from cronplane_kit.cli import KIT, Config, check, main
 from cronplane_kit.run import Outcome, runner
-from cronplane_kit.steps import Command, Context, Services, Step
+from cronplane_kit.steps import Command, Context, Previous, Services, Step
 
 from .conftest import plan, report
 
 
 class Fake:
-    """Answers `validate` with `answer` and `test --plan` with `flows`, and fails
-    the commands containing `failing`."""
+    """Answers `validate` with `answer`, `test --plan` with `flows` and
+    `test --plan --previous` with `before`, and fails the commands containing
+    `failing`."""
 
-    def __init__(self, answer: str, failing: str | None = None, flows: str | None = None) -> None:
+    def __init__(
+        self,
+        answer: str,
+        failing: str | None = None,
+        flows: str | None = None,
+        before: str | None = None,
+    ) -> None:
         self.answer, self.failing = answer, failing
         self.flows = plan(("hello.yaml", "e2e", {})) if flows is None else flows
+        self.before = self.flows if before is None else before
         self.ran: list[str] = []
 
     def __call__(self, command: Command) -> Outcome:
@@ -27,7 +35,7 @@ class Fake:
         if "validate" in command.argv:
             return Outcome(command, 0, self.answer)
         if "--plan" in command.argv and self.failing != "--plan":
-            return Outcome(command, 0, self.flows)
+            return Outcome(command, 0, self.before if "--previous" in command.argv else self.flows)
         failed = self.failing is not None and self.failing in str(command)
         return Outcome(command, 1 if failed else 0, "boom" if failed else "")
 
@@ -42,6 +50,16 @@ def run_check(
     said: list[str] = []
     ctx = Context(action, Path("/bin/cronplane"), KIT, action.parent / "work", services=services)
     return check(ctx, fake, steps=steps, version=version, say=said.append), said
+
+
+def run_regression(
+    action: Path, fake: Fake, previous: Previous, services: Services = Services.START
+) -> tuple[bool, list[str]]:
+    """The regression step alone, against `previous`."""
+    said: list[str] = []
+    work = action.parent / "work"
+    ctx = Context(action, Path("/bin/cronplane"), KIT, work, services=services, previous=previous)
+    return check(ctx, fake, steps=[Step.REGRESSION], say=said.append), said
 
 
 def test_the_steps_run_in_order_and_say_so(action: Path) -> None:
@@ -237,3 +255,87 @@ def test_the_command_line_takes_who_starts_the_services(
     with pytest.raises(SystemExit) as done:
         main(["check", str(action), "--step", "e2e", "--services", "running"])
     assert done.value.code == 0
+
+
+def test_without_the_version_before_the_regression_step_says_it_is_not_provided(
+    action: Path,
+) -> None:
+    fake = Fake(report())
+    ok, said = run_check(action, fake, [Step.REGRESSION])
+    assert ok
+    assert said[-1] == "✓ regression: not provided"
+    assert not any("compare" in c for c in fake.ran)
+
+
+def test_the_regression_step_compares_the_contracts_then_runs_the_flows_of_the_version_before(
+    action: Path, tmp_path: Path
+) -> None:
+    before = Previous(tmp_path / "v1", "1.4.2", "1.5.0")
+    fake = Fake(report(), before=plan(WRITE, ("read.yaml", "e2e", {}), services=("postgres",)))
+    ok, said = run_regression(action, fake, before)
+    assert ok
+    assert said[-1] == "✓ regression: 2 flows of the version before"
+    numbers = f"--previous {tmp_path / 'v1'} --from 1.4.2 --to 1.5.0"
+    compose = f"docker compose -f {tmp_path / 'v1' / 'tests' / 'compose.yaml'}"
+    assert fake.ran[1:] == [
+        f"/bin/cronplane test {action} --plan --json {numbers}",
+        f"/bin/cronplane action compare {action} {numbers}",
+        f"{compose} up -d --wait postgres",
+        f"/bin/cronplane test {action} {numbers} --runs-dir {action.parent / 'work' / 'runs'}",
+        f"{compose} down -v",
+    ]
+
+
+def test_a_number_too_low_for_the_contract_stops_before_any_flow_runs(
+    action: Path, tmp_path: Path
+) -> None:
+    fake = Fake(report(), failing="action compare")
+    ok, said = run_regression(action, fake, Previous(tmp_path / "v1"))
+    assert not ok
+    assert said[-1].startswith("✗ regression: /bin/cronplane action compare")
+    assert fake.ran[-1].startswith("/bin/cronplane action compare")
+
+
+def test_a_flow_of_the_version_before_that_fails_stops_its_services_too(
+    action: Path, tmp_path: Path
+) -> None:
+    before = plan(WRITE, services=("postgres",))
+    fake = Fake(report(), failing="--runs-dir", before=before)
+    ok, said = run_regression(action, fake, Previous(tmp_path / "v1"))
+    assert not ok
+    assert said[-1].startswith(f"✗ regression: /bin/cronplane test {action} --previous")
+    assert fake.ran[-1].endswith("down -v")
+
+
+def test_a_version_before_without_a_flow_that_runs_only_compares_the_contracts(
+    action: Path, tmp_path: Path
+) -> None:
+    fake = Fake(report(), before=plan())
+    ok, said = run_regression(action, fake, Previous(tmp_path / "v1"))
+    assert ok
+    assert said[-1] == "✓ regression: 0 flows of the version before"
+    assert fake.ran[-1] == f"/bin/cronplane action compare {action} --previous {tmp_path / 'v1'}"
+
+    running = Fake(report(), before=plan(WRITE, services=("postgres",)))
+    ok, _ = run_regression(action, running, Previous(tmp_path / "v1"), Services.RUNNING)
+    assert ok
+    assert not any("compose" in c.split() for c in running.ran)
+
+    unread = Fake(report(), failing="--plan")
+    ok, said = run_regression(action, unread, Previous(tmp_path / "v1"))
+    assert not ok
+    assert said[-1].startswith("✗ test flows: /bin/cronplane test")
+
+
+def test_the_command_line_takes_the_version_before_and_its_numbers(
+    action: Path, cronplane: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRONPLANE_BIN", str(cronplane))
+    (tmp_path / "plan.json").write_text(plan())
+    before = ["--previous", str(tmp_path / "v1"), "--from", "1.4.2", "--to", "1.5.0"]
+    with pytest.raises(SystemExit) as done:
+        main(["check", str(action), "--step", "regression", *before])
+    assert done.value.code == 0
+    with pytest.raises(SystemExit) as refused:
+        main(["check", str(action), "--step", "regression", "--from", "1.4.2"])
+    assert refused.value.code == 2

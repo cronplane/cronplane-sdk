@@ -10,6 +10,7 @@ uv run --project python cronplane-kit check path/to/action
 uv run --project python cronplane-kit check path/to/action --version 3.13   # one entry of the matrix (a CI job)
 uv run --project python cronplane-kit check path/to/action --step lint      # some steps only
 uv run --project python cronplane-kit check path/to/action --services running   # the services listen already
+uv run --project python cronplane-kit check path/to/action --previous path/to/v1 --from 1.4.2   # against the version before
 ```
 
 The steps run in order. The first failure stops them and shows its output.
@@ -26,6 +27,7 @@ The steps run in order. The first failure stops them and shows its output.
 | `licences` | The SBOM (Syft, SPDX) of what the action installs at run time, checked by grant against `licences/grant.yaml`. |
 | `e2e` | `cronplane test --level e2e`: the test flows that need doubles only. An action has one test flow at least (`tests/flows/<name>.yaml` with a `test:` block). |
 | `integration` | With the services the integration flows name: `docker compose -f tests/compose.yaml up -d --wait <services>`, then the tests of the language marked `integration` (what they cover is added to what `unit` covered, and the action's coverage threshold applies to the sum; without `unit` before it in the same check, every test runs here), then `cronplane test --level integration`, then `docker compose … down -v`, whatever failed. A service that does not start fails the step: a test is never skipped. |
+| `regression` | With `--previous <folder of the version before>`: `cronplane action compare` lists what the contract changes and the lowest version number that may carry it, then `cronplane test --previous` runs the test flows of the version before against the action, with the services of the `tests/compose.yaml` of that version. A flow that `tests/retired.yaml` of the action sets apart does not run. `--from` is the number of the version before, `--to` the number of the version checked: a number too low for the changes of contract is refused. Without `--previous`, the step says `not provided`. |
 
 The levels say what they ran: `✓ e2e: 2 flows`, `✓ integration: 1 flow, services: postgres`, or `not provided` for a level the action has no flow of.
 
@@ -41,7 +43,7 @@ bun ts/src/cli.ts check path/to/action                  # every Bun version of t
 bun ts/src/cli.ts check path/to/action --version 1.4    # one entry of the matrix (a CI job)
 ```
 
-The same steps, for Bun: `lockfile` (each dependency of `package.json` with an upper bound: `^1.2.0`, `~1.2.0`, `>=0.1.1 <1.0.0`; then `bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `unit` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `e2e`, `integration` (the services, then the integration flows, then the stop of the services).
+The same steps, for Bun: `lockfile` (each dependency of `package.json` with an upper bound: `^1.2.0`, `~1.2.0`, `>=0.1.1 <1.0.0`; then `bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `unit` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `e2e`, `integration` (the services, then the integration flows, then the stop of the services), `regression` (the same as for Python).
 
 A test of the language that needs a service is in a file named `*.integration.test.ts`. Bun has no mark for it and does not add a coverage to another, so the two steps share the work this way: `unit` runs the other test files, without coverage; `integration` runs every test with coverage, under the threshold, with the test values of the integration flows in the environment. The tests that need no service run twice. An action without such a file keeps its threshold on `unit`. There is no `format` step: no formatter is decided for TypeScript.
 

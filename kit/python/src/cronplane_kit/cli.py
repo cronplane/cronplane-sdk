@@ -14,7 +14,17 @@ from pathlib import Path
 from .plan import NO_PLAN, Level, Plan, PlanError
 from .report import Report, ReportError
 from .run import Outcome, Runner, runner
-from .steps import STEPS, Command, Context, OnFailure, Services, Step, StepError, When
+from .steps import (
+    STEPS,
+    Command,
+    Context,
+    OnFailure,
+    Previous,
+    Services,
+    Step,
+    StepError,
+    When,
+)
 
 #: The kit's folder: `python/src/cronplane_kit/cli.py` is in it.
 KIT = Path(__file__).resolve().parents[3]
@@ -57,7 +67,19 @@ def check(
     plan = _plan(ctx, run, say) if _LEVELS.intersection(steps) else NO_PLAN
     if plan is None:
         return False
-    ctx = replace(ctx, versions=versions, requires_cronplane=report.requires_cronplane, plan=plan)
+    previous = ctx.previous
+    if previous is not None and Step.REGRESSION in steps:
+        before = _plan(ctx, run, say, previous)
+        if before is None:
+            return False
+        previous = replace(previous, plan=before)
+    ctx = replace(
+        ctx,
+        versions=versions,
+        requires_cronplane=report.requires_cronplane,
+        plan=plan,
+        previous=previous,
+    )
     return _steps(ctx, run, steps, say)
 
 
@@ -73,12 +95,18 @@ def _steps(ctx: Context, run: Runner, steps: Sequence[Step], say: Callable[[str]
             return False
         if not _run_step(step, commands, run, say):
             return False
-        say(f"✓ {step}{_count(step, ctx.plan)}")
+        say(f"✓ {step}{_count(step, ctx)}")
     return True
 
 
-def _count(step: Step, plan: Plan) -> str:
+def _count(step: Step, ctx: Context) -> str:
     """What a level ran, after its name: its flows, and its services."""
+    if step is Step.REGRESSION:
+        if ctx.previous is None:
+            return ": not provided"
+        flows = len(ctx.previous.plan.flows)
+        return f": {flows} flow{'s' if flows != 1 else ''} of the version before"
+    plan = ctx.plan
     level = {Step.E2E: Level.E2E, Step.INTEGRATION: Level.INTEGRATION}.get(step)
     if level is None:
         return ""
@@ -113,8 +141,14 @@ def _run_step(
 _LEVELS = frozenset({Step.UNIT, Step.E2E, Step.INTEGRATION})
 
 
-def _plan(ctx: Context, run: Runner, say: Callable[[str], None]) -> Plan | None:
-    command = Command([str(ctx.cronplane), "test", str(ctx.action), "--plan", "--json"], ctx.action)
+def _plan(
+    ctx: Context, run: Runner, say: Callable[[str], None], previous: Previous | None = None
+) -> Plan | None:
+    """The test flows of the action, or those of `previous` that run against it."""
+    before = [] if previous is None else ["--previous", str(previous.folder), *previous.numbers()]
+    command = Command(
+        [str(ctx.cronplane), "test", str(ctx.action), "--plan", "--json", *before], ctx.action
+    )
     outcome = run(command)
     if not outcome.ok:
         say(f"✗ test flows: {command}\n{outcome.output}")
@@ -160,7 +194,17 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="start: the kit starts the services of tests/compose.yaml and stops them; "
         "running: they listen already",
     )
+    checking.add_argument(
+        "--previous",
+        type=Path,
+        help="the folder of the version before: the regression step compares the contracts "
+        "and runs its test flows against the action",
+    )
+    checking.add_argument("--from", dest="number", help="the number of the version before (X.Y.Z)")
+    checking.add_argument("--to", dest="next_number", help="the number of the version checked")
     args = parser.parse_args(argv)
+    if args.previous is None and (args.number or args.next_number):
+        parser.error("--from and --to are the numbers around --previous")
     config = Config.from_environment(os.environ)
     action = Path(args.action).resolve()
     steps = [Step(s) for s in args.step] if args.step else list(Step)
@@ -173,6 +217,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             work=Path(work),
             sbom=sbom,
             services=Services(args.services),
+            previous=None
+            if args.previous is None
+            else Previous(Path(args.previous).resolve(), args.number, args.next_number),
         )
         ok = check(ctx, runner(os.environ), steps=steps, version=args.version)
     sys.exit(0 if ok else 1)

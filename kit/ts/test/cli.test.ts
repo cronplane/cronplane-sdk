@@ -4,11 +4,20 @@ import { join } from "node:path";
 
 import { check, KIT, main } from "../src/cli.ts";
 import { type Outcome, runner } from "../src/run.ts";
-import { type Command, type Services, show, type Step, STEPS } from "../src/steps.ts";
+import { type Command, type Previous, type Services, show, type Step, STEPS } from "../src/steps.ts";
+import { NO_PLAN } from "../src/plan.ts";
 import { action, context, plan, report } from "./helpers.ts";
 
-/** Answers `validate` with `answer` and `test --plan` with `flows`, and fails the commands containing `failing`. */
-function fake(answer: string, failing?: string | RegExp, flows: string = plan()): { run: (command: Command) => Outcome; ran: string[] } {
+/**
+ * Answers `validate` with `answer`, `test --plan` with `flows` and `test --plan --previous` with
+ * `before`, and fails the commands containing `failing`.
+ */
+function fake(
+  answer: string,
+  failing?: string | RegExp,
+  flows: string = plan(),
+  before: string = flows,
+): { run: (command: Command) => Outcome; ran: string[] } {
   const ran: string[] = [];
   return {
     ran,
@@ -18,7 +27,7 @@ function fake(answer: string, failing?: string | RegExp, flows: string = plan())
         return { code: 0, output: answer };
       }
       if (command.argv.includes("--plan") && failing !== "--plan") {
-        return { code: 0, output: flows };
+        return { code: 0, output: command.argv.includes("--previous") ? before : flows };
       }
       const failed = failing !== undefined && (typeof failing === "string" ? show(command).includes(failing) : failing.test(show(command)));
       return { code: failed ? 1 : 0, output: failed ? "boom" : "" };
@@ -29,16 +38,21 @@ function fake(answer: string, failing?: string | RegExp, flows: string = plan())
 function runCheck(
   answer: string,
   steps: readonly Step[],
-  options: { failing?: string | RegExp; version?: string; flows?: string; services?: Services } = {},
+  options: { failing?: string | RegExp; version?: string; flows?: string; services?: Services; previous?: Previous; before?: string } = {},
 ) {
   const said: string[] = [];
-  const runs = fake(answer, options.failing, options.flows);
-  const ok = check({ ...context(action(), []), services: options.services ?? "start" }, runs.run, {
+  const runs = fake(answer, options.failing, options.flows, options.before);
+  const ctx = {
+    ...context(action(), []),
+    services: options.services ?? "start",
+    ...(options.previous === undefined ? {} : { previous: options.previous }),
+  };
+  const ok = check(ctx, runs.run, {
     steps,
     ...(options.version === undefined ? {} : { version: options.version }),
     say: (line) => said.push(line),
   });
-  return { ok, said, ran: runs.ran };
+  return { ok, said, ran: runs.ran, action: ctx.action, work: ctx.work };
 }
 
 test("the steps run in order and say so", () => {
@@ -119,6 +133,10 @@ test("the command line checks an action with the cronplane given", () => {
   expect(main(["check", folder, "--step", "nope"], environment)).toBe(2);
   expect(main(["check", folder, "--step", "e2e", "--services", "running"], environment)).toBe(0);
   expect(main(["check", folder, "--step", "e2e", "--services", "later"], environment)).toBe(2);
+  const before = ["--previous", join(folder, "..", "v1"), "--from", "1.4.2", "--to", "1.5.0"];
+  expect(main(["check", folder, "--step", "regression", ...before], environment)).toBe(0);
+  expect(main(["check", folder, "--step", "regression", "--previous", join(folder, "..", "v1")], environment)).toBe(0);
+  expect(main(["check", folder, "--step", "regression", "--from", "1.4.2"], environment)).toBe(2);
   expect(main(["check", folder], { PATH: process.env["PATH"] })).toBe(2);
   expect(main(["help"], environment)).toBe(2);
   expect(main(["--help"], environment)).toBe(0);
@@ -167,4 +185,60 @@ test("services that run already are left alone", () => {
   expect(ok).toBe(true);
   expect(ran.some((command) => command.includes("compose"))).toBe(false);
   expect(ran.some((command) => command.includes("--level integration"))).toBe(true);
+});
+
+test("without the version before, the regression step says it is not provided", () => {
+  const { ok, said, ran } = runCheck(report(), ["regression"]);
+  expect([ok, said.at(-1)]).toEqual([true, "✓ regression: not provided"]);
+  expect(ran.some((command) => command.includes("compare"))).toBe(false);
+});
+
+const V1: Previous = { folder: "/src/v1", plan: NO_PLAN };
+
+test("the regression step compares the contracts, then runs the flows of the version before", () => {
+  const previous = { ...V1, number: "1.4.2", nextNumber: "1.5.0" };
+  const before = plan([WRITE, ["read.yaml", "e2e"]], ["postgres"]);
+  const { ok, said, ran, action: folder, work } = runCheck(report(), ["regression"], { previous, before });
+  expect([ok, said.at(-1)]).toEqual([true, "✓ regression: 2 flows of the version before"]);
+  const numbers = "--previous /src/v1 --from 1.4.2 --to 1.5.0";
+  const compose = "docker compose -f /src/v1/tests/compose.yaml";
+  expect(ran.slice(1)).toEqual([
+    `/bin/cronplane test ${folder} --plan --json ${numbers}`,
+    `/bin/cronplane action compare ${folder} ${numbers}`,
+    `${compose} up -d --wait postgres`,
+    `/bin/cronplane test ${folder} ${numbers} --runs-dir ${join(work, "runs")}`,
+    `${compose} down -v`,
+  ]);
+});
+
+test("a number too low for the contract stops before any flow runs", () => {
+  const { ok, said, ran } = runCheck(report(), ["regression"], { previous: V1, failing: "action compare" });
+  expect(ok).toBe(false);
+  expect(said.at(-1)?.startsWith("✗ regression: /bin/cronplane action compare")).toBe(true);
+  expect(ran.at(-1)?.startsWith("/bin/cronplane action compare")).toBe(true);
+});
+
+test("a flow of the version before that fails stops its services too", () => {
+  const before = plan([WRITE], ["postgres"]);
+  const { ok, said, ran } = runCheck(report(), ["regression"], { previous: V1, before, failing: "--runs-dir" });
+  expect(ok).toBe(false);
+  expect(said.at(-1)).toContain("✗ regression: /bin/cronplane test");
+  expect(ran.at(-1)?.endsWith("down -v")).toBe(true);
+});
+
+test("a version before without a flow that runs only compares the contracts", () => {
+  const none = runCheck(report(), ["regression"], { previous: V1, before: plan([]) });
+  expect([none.ok, none.said.at(-1)]).toEqual([true, "✓ regression: 0 flows of the version before"]);
+  expect(none.ran.at(-1)).toBe(`/bin/cronplane action compare ${none.action} --previous /src/v1`);
+
+  const before = plan([WRITE], ["postgres"]);
+  const running = runCheck(report(), ["regression"], { previous: V1, before, services: "running" });
+  expect([running.ok, running.said.at(-1)]).toEqual([true, "✓ regression: 1 flow of the version before"]);
+  expect(running.ran.some((command) => command.includes("compose"))).toBe(false);
+  const doubles = runCheck(report(), ["regression"], { previous: V1, before: plan([["read.yaml", "e2e"]]) });
+  expect(doubles.ran.some((command) => command.includes("compose"))).toBe(false);
+
+  const unread = runCheck(report(), ["regression"], { previous: V1, failing: "--plan" });
+  expect(unread.ok).toBe(false);
+  expect(unread.said.at(-1)?.startsWith("✗ test flows: /bin/cronplane test")).toBe(true);
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * `cronplane-kit-ts check <action> [--version X] [--step S] [--services running]`: the checks of a
- * TypeScript action, in order; the first failure stops them.
+ * `cronplane-kit-ts check <action> [--version X] [--step S] [--services running] [--previous FOLDER]`:
+ * the checks of a TypeScript action, in order; the first failure stops them.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { flowsOf, NO_PLAN, parsePlan, type Plan, PlanError } from "./plan.ts";
 import { describe, parseReport, type Report, ReportError } from "./report.ts";
 import { type Runner, runner } from "./run.ts";
-import { build, type Command, type Context, SERVICES, show, type Step, StepError, STEPS } from "./steps.ts";
+import { before, build, type Command, type Context, type Previous, SERVICES, show, type Step, StepError, STEPS } from "./steps.ts";
 
 /** The kit's folder: `ts/src/cli.ts` is in it. */
 export const KIT = resolve(dirname(import.meta.dir), "..");
@@ -46,7 +46,21 @@ export function check(ctx: Context, run: Runner, options: Options): boolean {
   if (plan === undefined) {
     return false;
   }
-  const context = { ...ctx, versions, plan, ...(report.requiresCronplane === undefined ? {} : { requiresCronplane: report.requiresCronplane }) };
+  let previous = ctx.previous;
+  if (previous !== undefined && options.steps.includes("regression")) {
+    const flows = readPlan(ctx, run, say, previous);
+    if (flows === undefined) {
+      return false;
+    }
+    previous = { ...previous, plan: flows };
+  }
+  const context: Context = {
+    ...ctx,
+    versions,
+    plan,
+    ...(report.requiresCronplane === undefined ? {} : { requiresCronplane: report.requiresCronplane }),
+    ...(previous === undefined ? {} : { previous }),
+  };
   for (const step of options.steps.filter((s) => s !== "validate")) {
     let commands;
     try {
@@ -61,16 +75,24 @@ export function check(ctx: Context, run: Runner, options: Options): boolean {
     if (!runStep(step, commands, run, say)) {
       return false;
     }
-    say(`✓ ${step}${count(step, plan)}`);
+    say(`✓ ${step}${count(step, context)}`);
   }
   return true;
 }
 
 /** What a level ran, after its name: its flows, and its services. */
-function count(step: Step, plan: Plan): string {
+function count(step: Step, ctx: Context): string {
+  if (step === "regression") {
+    if (ctx.previous === undefined) {
+      return ": not provided";
+    }
+    const flows = ctx.previous.plan.flows.length;
+    return `: ${String(flows)} flow${flows === 1 ? "" : "s"} of the version before`;
+  }
   if (step !== "e2e" && step !== "integration") {
     return "";
   }
+  const plan = ctx.plan;
   const flows = flowsOf(plan, step).length;
   if (flows === 0) {
     return ": not provided";
@@ -103,8 +125,12 @@ function runStep(step: Step, commands: readonly Command[], run: Runner, say: (li
 /** The steps that read the test flows of the action. */
 const LEVEL_STEPS: readonly Step[] = ["e2e", "integration"];
 
-function readPlan(ctx: Context, run: Runner, say: (line: string) => void): Plan | undefined {
-  const command: Command = { argv: [ctx.cronplane, "test", ctx.action, "--plan", "--json"], cwd: ctx.action };
+/** The test flows of the action, or those of `previous` that run against it. */
+function readPlan(ctx: Context, run: Runner, say: (line: string) => void, previous?: Previous): Plan | undefined {
+  const command: Command = {
+    argv: [ctx.cronplane, "test", ctx.action, "--plan", "--json", ...(previous === undefined ? [] : before(previous))],
+    cwd: ctx.action,
+  };
   const outcome = run(command);
   if (outcome.code !== 0) {
     say(`✗ test flows: ${show(command)}\n${outcome.output}`);
@@ -144,7 +170,8 @@ function validate(ctx: Context, run: Runner, say: (line: string) => void): Repor
 
 /** The command line; the exit code it ends with. */
 export function main(argv: readonly string[], environment: Readonly<Record<string, string | undefined>>): number {
-  const usage = "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running]";
+  const usage =
+    "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running] [--previous FOLDER [--from X.Y.Z] [--to X.Y.Z]]";
   const { positionals, values } = parseArgs({
     args: [...argv],
     allowPositionals: true,
@@ -153,6 +180,9 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
       step: { type: "string", multiple: true },
       sbom: { type: "string" },
       services: { type: "string" },
+      previous: { type: "string" },
+      from: { type: "string" },
+      to: { type: "string" },
       help: { type: "boolean" },
     },
   });
@@ -177,11 +207,26 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
     console.error(`--services ${String(values.services)}: one of ${SERVICES.join(", ")}`);
     return 2;
   }
+  if (values.previous === undefined && (values.from !== undefined || values.to !== undefined)) {
+    console.error("--from and --to are the numbers around --previous");
+    return 2;
+  }
+  const previous: { previous?: Previous } =
+    values.previous === undefined
+      ? {}
+      : {
+          previous: {
+            folder: resolve(values.previous),
+            plan: NO_PLAN,
+            ...(values.from === undefined ? {} : { number: values.from }),
+            ...(values.to === undefined ? {} : { nextNumber: values.to }),
+          },
+        };
   const steps = values.step === undefined ? STEPS : STEPS.filter((step) => values.step?.includes(step));
   const work = mkdtempSync(join(tmpdir(), "cronplane-kit-"));
   try {
     const sbom = values.sbom === undefined ? {} : { sbom: resolve(values.sbom) };
-    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom };
+    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom, ...previous };
     return check(ctx, runner(environment), { steps, ...(values.version === undefined ? {} : { version: values.version }) }) ? 0 : 1;
   } finally {
     rmSync(work, { recursive: true, force: true });
