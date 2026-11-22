@@ -55,9 +55,12 @@ def _server(url: str) -> _Server:
 class _Pinned(smtplib.SMTP):
     """An SMTP session over a socket that already goes to a checked address."""
 
-    def __init__(self, sock: socket.socket, timeout: float) -> None:
+    def __init__(self, sock: socket.socket, host: str, timeout: float) -> None:
         super().__init__(timeout=timeout)
         self._pinned = sock
+        # STARTTLS checks the certificate against this name, and some Python
+        # versions leave it empty when `connect` is a separate call.
+        self._host = host
 
     def _get_socket(self, host: str, port: int, timeout: float) -> socket.socket:
         return self._pinned
@@ -97,7 +100,7 @@ class SmtpClient:
         addresses = self._checked(server)
         clear = server.scheme == "smtp" and self._clear(server, addresses)
         sock = self._open(addresses, server)
-        session = _Pinned(sock, self.timeout)
+        session = _Pinned(sock, server.host, self.timeout)
         try:
             session.connect(server.host, server.port)
             if server.scheme == "smtp" and not clear:
