@@ -4,10 +4,11 @@ Python action, in order; the first failure stops them."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from .steps import (
     StepError,
     When,
 )
+from .steps import results as steps_results
 from .steps import sheet as steps_sheet
 
 #: The kit's folder: `python/src/cronplane_kit/cli.py` is in it.
@@ -85,6 +87,8 @@ def check(
         previous=previous,
     )
     ended = _steps(ctx, run, steps, say)
+    if ctx.results is not None:
+        ctx.results.write_text(steps_results(ctx, ended), encoding="utf-8")
     if ctx.sheet is not None or set(steps) == set(Step):
         outcome = run(steps_sheet(ctx, ended))
         say(outcome.output.rstrip("\n"))
@@ -189,6 +193,19 @@ def _validate(ctx: Context, run: Runner, say: Callable[[str], None]) -> Report |
     return report
 
 
+@contextlib.contextmanager
+def _work(kept: Path | None) -> Generator[str]:
+    """The directory of the check's own: `kept`, made when it is not there, else
+    one that ends with the check."""
+    if kept is None:
+        with tempfile.TemporaryDirectory(prefix="cronplane-kit-") as work:
+            yield work
+        return
+    folder = kept.resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    yield str(folder)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cronplane-kit", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -218,6 +235,16 @@ def main(argv: Sequence[str] | None = None) -> None:
     checking.add_argument(
         "--sheet", type=Path, help="keep the sheet of the action there (JSON), and say it"
     )
+    checking.add_argument(
+        "--results",
+        type=Path,
+        help="keep how each step ended there (JSON), for `cronplane action sheet --results`",
+    )
+    checking.add_argument(
+        "--work",
+        type=Path,
+        help="keep the environments and what the tests covered there, from a check to the next",
+    )
     checking.add_argument("--from", dest="number", help="the number of the version before (X.Y.Z)")
     checking.add_argument("--to", dest="next_number", help="the number of the version checked")
     args = parser.parse_args(argv)
@@ -226,7 +253,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = Config.from_environment(os.environ)
     action = Path(args.action).resolve()
     steps = [Step(s) for s in args.step] if args.step else list(Step)
-    with tempfile.TemporaryDirectory(prefix="cronplane-kit-") as work:
+    with _work(args.work) as work:
         sbom = Path(args.sbom).resolve() if args.sbom else None
         ctx = Context(
             action=action,
@@ -236,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             sbom=sbom,
             services=Services(args.services),
             sheet=Path(args.sheet).resolve() if args.sheet else None,
+            results=Path(args.results).resolve() if args.results else None,
             previous=None
             if args.previous is None
             else Previous(Path(args.previous).resolve(), args.number, args.next_number),

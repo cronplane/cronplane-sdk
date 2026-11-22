@@ -82,6 +82,8 @@ export interface Context {
   readonly previous?: Previous;
   /** Where the sheet of the action is kept as JSON; none: it is not kept. */
   readonly sheet?: string;
+  /** Where how the steps ended is kept as JSON, for who writes the sheet itself. */
+  readonly results?: string;
 }
 
 /** How a step ended, as the sheet reads it: `not_run` when the checks stopped before it, or it was not asked. */
@@ -161,11 +163,15 @@ export function measuredCoverage(ctx: Context): number | undefined {
   return found > 0 ? Math.round((sum("LH") / found) * 10000) / 100 : undefined;
 }
 
-/** `cronplane action sheet`: one line per check, from how each step ended. */
-export function sheet(ctx: Context, ended: ReadonlyMap<Step, Ended>): Command {
+/** How each step ended and what the tests covered, as `cronplane action sheet --results` reads it (JSON). */
+export function results(ctx: Context, ended: ReadonlyMap<Step, Ended>): string {
   const floor = readFloor(ctx.action);
   const coverage = floor instanceof StepError ? null : { measured: measuredCoverage(ctx) ?? null, threshold: Math.round(floor * 10000) / 100 };
-  const results = { version: 1, steps: Object.fromEntries(STEPS.map((step) => [step, ended.get(step) ?? "not_run"])), coverage };
+  return JSON.stringify({ version: 1, steps: Object.fromEntries(STEPS.map((step) => [step, ended.get(step) ?? "not_run"])), coverage });
+}
+
+/** `cronplane action sheet`: one line per check, from how each step ended. */
+export function sheet(ctx: Context, ended: ReadonlyMap<Step, Ended>): Command {
   const file = join(ctx.work, "results.json");
   return {
     argv: [
@@ -179,7 +185,7 @@ export function sheet(ctx: Context, ended: ReadonlyMap<Step, Ended>): Command {
       ...(ctx.sheet === undefined ? [] : ["--output", ctx.sheet]),
     ],
     cwd: ctx.action,
-    writes: [[file, JSON.stringify(results)]],
+    writes: [[file, results(ctx, ended)]],
     // A line that failed ends it in error: the steps already said so.
     onFailure: "report",
   };

@@ -140,6 +140,8 @@ class Context:
     previous: Previous | None = None
     #: Where the sheet of the action is kept as JSON; none: it is not kept.
     sheet: Path | None = None
+    #: Where how the steps ended is kept as JSON, for who writes the sheet itself.
+    results: Path | None = None
 
 
 def tool(name: str, *args: str) -> list[str]:
@@ -240,8 +242,9 @@ def measured_coverage(ctx: Context) -> float | None:
     return round(float(percent), 2)
 
 
-def sheet(ctx: Context, ended: dict[Step, Ended]) -> Command:
-    """`cronplane action sheet`: one line per check, from how each step ended."""
+def results(ctx: Context, ended: dict[Step, Ended]) -> str:
+    """How each step ended and what the tests covered, as `cronplane action
+    sheet --results` reads it (JSON)."""
     try:
         coverage: dict[str, float | None] | None = {
             "measured": measured_coverage(ctx),
@@ -249,11 +252,17 @@ def sheet(ctx: Context, ended: dict[Step, Ended]) -> Command:
         }
     except StepError:
         coverage = None
-    results = {
-        "version": 1,
-        "steps": {step.value: ended.get(step, Ended.NOT_RUN).value for step in Step},
-        "coverage": coverage,
-    }
+    return json.dumps(
+        {
+            "version": 1,
+            "steps": {step.value: ended.get(step, Ended.NOT_RUN).value for step in Step},
+            "coverage": coverage,
+        }
+    )
+
+
+def sheet(ctx: Context, ended: dict[Step, Ended]) -> Command:
+    """`cronplane action sheet`: one line per check, from how each step ended."""
     file = ctx.work / "results.json"
     before = [] if ctx.previous is None else ["--previous", str(ctx.previous.folder)]
     numbers = [] if ctx.previous is None else ctx.previous.numbers()
@@ -271,7 +280,7 @@ def sheet(ctx: Context, ended: dict[Step, Ended]) -> Command:
             *kept,
         ],
         ctx.action,
-        writes=((file, json.dumps(results)),),
+        writes=((file, results(ctx, ended)),),
         # A line that failed ends it in error: the steps already said so.
         on_failure=OnFailure.REPORT,
     )

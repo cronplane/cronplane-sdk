@@ -414,3 +414,16 @@ def test_the_command_line_keeps_the_sheet_where_it_is_asked(
     with pytest.raises(SystemExit) as done:
         main(["check", str(action), "--step", "e2e", "--sheet", str(tmp_path / "sheet.json")])
     assert done.value.code == 0
+
+
+def test_the_results_and_the_work_of_a_check_are_kept_where_they_are_asked(
+    action: Path, cronplane: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRONPLANE_BIN", str(cronplane))
+    kept, work = tmp_path / "results.json", tmp_path / "kept" / "work"
+    with pytest.raises(SystemExit) as done:
+        main(["check", str(action), "--step", "e2e", "--results", str(kept), "--work", str(work)])
+    assert done.value.code == 0
+    results = json.loads(kept.read_text())
+    assert (results["steps"]["e2e"], results["steps"]["unit"]) == ("passed", "not_run")
+    assert work.is_dir(), "it stays for the next check"

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { check, KIT, main } from "../src/cli.ts";
@@ -134,6 +134,11 @@ test("the command line checks an action with the cronplane given", () => {
   expect(main(["check", folder, "--step", "e2e", "--services", "running"], environment)).toBe(0);
   expect(main(["check", folder, "--step", "e2e", "--services", "later"], environment)).toBe(2);
   expect(main(["check", folder, "--step", "e2e", "--sheet", join(folder, "..", "sheet.json")], environment)).toBe(0);
+  const kept = join(folder, "..", "results.json");
+  const work = join(folder, "..", "kept", "work");
+  expect(main(["check", folder, "--step", "e2e", "--results", kept, "--work", work], environment)).toBe(0);
+  expect(JSON.parse(readFileSync(kept, "utf8"))).toMatchObject({ version: 1, steps: { e2e: "passed", unit: "not_run" } });
+  expect(existsSync(work)).toBe(true);
   const before = ["--previous", join(folder, "..", "v1"), "--from", "1.4.2", "--to", "1.5.0"];
   expect(main(["check", folder, "--step", "regression", ...before], environment)).toBe(0);
   expect(main(["check", folder, "--step", "regression", "--previous", join(folder, "..", "v1")], environment)).toBe(0);

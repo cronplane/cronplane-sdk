@@ -4,7 +4,7 @@
  * the checks of a TypeScript action, in order; the first failure stops them.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { flowsOf, NO_PLAN, parsePlan, type Plan, PlanError } from "./plan.ts";
 import { describe, parseReport, type Report, ReportError } from "./report.ts";
 import { type Runner, runner } from "./run.ts";
-import { before, build, type Command, type Context, type Ended, type Previous, SERVICES, sheet, show, type Step, StepError, STEPS } from "./steps.ts";
+import { before, build, type Command, type Context, type Ended, type Previous, results, SERVICES, sheet, show, type Step, StepError, STEPS } from "./steps.ts";
 
 /** The kit's folder: `ts/src/cli.ts` is in it. */
 export const KIT = resolve(dirname(import.meta.dir), "..");
@@ -65,6 +65,10 @@ export function check(ctx: Context, run: Runner, options: Options): boolean {
     ...(previous === undefined ? {} : { previous }),
   };
   const ended = runSteps(context, run, options.steps, say);
+  if (context.results !== undefined) {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- the file the command line names
+    writeFileSync(context.results, results(context, ended));
+  }
   if (context.sheet !== undefined || STEPS.every((step) => options.steps.includes(step))) {
     say(run(sheet(context, ended)).output.trimEnd());
   }
@@ -187,7 +191,7 @@ function validate(ctx: Context, run: Runner, say: (line: string) => void): Repor
 /** The command line; the exit code it ends with. */
 export function main(argv: readonly string[], environment: Readonly<Record<string, string | undefined>>): number {
   const usage =
-    "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running] [--previous FOLDER [--from X.Y.Z] [--to X.Y.Z]] [--sheet FILE]";
+    "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running] [--previous FOLDER [--from X.Y.Z] [--to X.Y.Z]] [--sheet FILE] [--results FILE] [--work FOLDER]";
   const { positionals, values } = parseArgs({
     args: [...argv],
     allowPositionals: true,
@@ -198,6 +202,8 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
       services: { type: "string" },
       previous: { type: "string" },
       sheet: { type: "string" },
+      results: { type: "string" },
+      work: { type: "string" },
       from: { type: "string" },
       to: { type: "string" },
       help: { type: "boolean" },
@@ -240,13 +246,21 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
           },
         };
   const steps = values.step === undefined ? STEPS : STEPS.filter((step) => values.step?.includes(step));
-  const work = mkdtempSync(join(tmpdir(), "cronplane-kit-"));
+  // A directory of the check's own: the one asked, kept for the next check, else one that ends with it.
+  const kept = values.work === undefined ? undefined : resolve(values.work);
+  const work = kept ?? mkdtempSync(join(tmpdir(), "cronplane-kit-"));
+  if (kept !== undefined) {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- the folder the command line names
+    mkdirSync(kept, { recursive: true });
+  }
   try {
     const sbom = values.sbom === undefined ? {} : { sbom: resolve(values.sbom) };
-    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom, ...previous, ...(values.sheet === undefined ? {} : { sheet: resolve(values.sheet) }) };
+    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom, ...previous, ...(values.sheet === undefined ? {} : { sheet: resolve(values.sheet) }), ...(values.results === undefined ? {} : { results: resolve(values.results) }) };
     return check(ctx, runner(environment), { steps, ...(values.version === undefined ? {} : { version: values.version }) }) ? 0 : 1;
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    if (kept === undefined) {
+      rmSync(work, { recursive: true, force: true });
+    }
   }
 }
 
