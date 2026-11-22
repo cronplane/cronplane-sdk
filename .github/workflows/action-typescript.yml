@@ -3,7 +3,7 @@
 #   jobs:
 #     check:
 #       uses: cronplane/cronplane-sdk/.github/workflows/action-typescript.yml@<commit>
-#       with: {kit-ref: <the same commit>, cronplane-image: <image>@sha256:…, fixtures: "postgres"}
+#       with: {kit-ref: <the same commit>, cronplane-image: <image>@sha256:…}
 # No secret is used or needed; never call it from pull_request_target.
 name: TypeScript action
 
@@ -18,10 +18,6 @@ on:
         description: An image with the cronplane binary at /usr/local/bin/cronplane, pinned by digest.
         type: string
         required: true
-      fixtures:
-        description: Profiles of fixtures/compose.yaml to start, separated by spaces.
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -77,14 +73,6 @@ jobs:
           docker cp "$id:/usr/local/bin/cronplane" "$RUNNER_TEMP/cronplane"
           docker rm "$id"
           echo "CRONPLANE_BIN=$RUNNER_TEMP/cronplane" >> "$GITHUB_ENV"
-      - name: Fixtures
-        if: inputs.fixtures != ''
-        env:
-          PROFILES: ${{ inputs.fixtures }}
-        run: |
-          set --
-          for profile in $PROFILES; do set -- "$@" --profile "$profile"; done
-          docker compose -f .kit/kit/fixtures/compose.yaml "$@" up -d --wait
       - name: Check
         # Through a variable: a value from the action's repository is never code.
         env:
