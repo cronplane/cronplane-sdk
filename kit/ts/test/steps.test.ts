@@ -24,12 +24,12 @@ test("validate asks for the hub rules as JSON", () => {
 test("the rules are the kit's whatever the action configures", () => {
   const folder = action();
   const [types] = build("types", context(folder));
-  expect(types?.argv).toEqual([join(KIT, "ts", "node_modules", ".bin", "tsc"), "--project", join(folder, "..", "work", "tsconfig.json")]);
+  expect(types?.argv).toEqual(["bun", join(KIT, "ts", "node_modules", ".bin", "tsc"), "--project", join(folder, "..", "work", "tsconfig.json")]);
   const written = JSON.parse(types?.writes?.[0]?.[1] ?? "{}") as { compilerOptions: { strict: boolean }; include: string[] };
   expect(written.compilerOptions.strict).toBe(true);
   expect(written.include).toEqual([join(folder, "**", "*.ts")]);
   const [lint] = build("lint", context(folder));
-  expect(lint?.argv.slice(1, 3)).toEqual(["--config", join(KIT, "ts", "rules", "eslint.config.js")]);
+  expect(lint?.argv).toEqual(["bun", join(KIT, "ts", "node_modules", ".bin", "eslint"), "--config", join(KIT, "ts", "rules", "eslint.config.js"), "."]);
   expect(lint?.env?.["CRONPLANE_KIT_TSCONFIG"]).toBe(join(folder, "..", "work", "tsconfig.json"));
 });
 

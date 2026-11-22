@@ -91,9 +91,9 @@ export type Ended = "passed" | "failed" | "not_run";
 
 export { StepError } from "./errors.ts";
 
-/** The kit's own tools. */
-function bin(ctx: Context, name: string): string {
-  return join(ctx.kit, "ts", "node_modules", ".bin", name);
+/** One of the kit's own tools, run by Bun: a machine of the checks has no Node.js. */
+function tool(ctx: Context, name: string): readonly [string, string] {
+  return ["bun", join(ctx.kit, "ts", "node_modules", ".bin", name)];
 }
 
 const COMPILER_OPTIONS = {
@@ -231,12 +231,12 @@ const builds: Readonly<Record<Step, Build>> = {
     checkBounds(ctx.action);
     return [{ argv: ["bun", "install", "--frozen-lockfile"], cwd: ctx.action }];
   },
-  types: (ctx) => [{ argv: [bin(ctx, "tsc"), "--project", tsconfig(ctx)[0]], cwd: ctx.action, writes: [tsconfig(ctx)] }],
+  types: (ctx) => [{ argv: [...tool(ctx, "tsc"), "--project", tsconfig(ctx)[0]], cwd: ctx.action, writes: [tsconfig(ctx)] }],
   // Asked to the library the lockfile step installed.
   cronplane: (ctx) => [{ argv: ["bun", join(ctx.kit, "ts", "src", "needs.ts"), ctx.action, ctx.requiresCronplane ?? ""], cwd: ctx.action }],
   lint: (ctx) => [
     {
-      argv: [bin(ctx, "eslint"), "--config", join(ctx.kit, "ts", "rules", "eslint.config.js"), "."],
+      argv: [...tool(ctx, "eslint"), "--config", join(ctx.kit, "ts", "rules", "eslint.config.js"), "."],
       cwd: ctx.action,
       env: { CRONPLANE_KIT_TSCONFIG: tsconfig(ctx)[0] },
       writes: [tsconfig(ctx)],
