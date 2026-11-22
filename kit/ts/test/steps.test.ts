@@ -129,3 +129,11 @@ test("only an advisory on what the action installs at run time fails the audit",
   expect([runtime?.argv, runtime?.onFailure]).toEqual([["bun", "audit", "--production"], undefined]);
   expect([everything?.argv, everything?.onFailure]).toEqual([["bun", "audit"], "report"]);
 });
+
+test("prepare takes from the network what the tests need and runs none", () => {
+  expect(argv("prepare", action())).toEqual([
+    ["bun", "install", "--frozen-lockfile"],
+    ["mise", "exec", "bun@1.3", "--", "bun", "--version"],
+    ["mise", "exec", "bun@1.4", "--", "bun", "--version"],
+  ]);
+});

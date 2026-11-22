@@ -36,6 +36,7 @@ class Step(StrEnum):
     LINT = "lint"
     TYPES = "types"
     CRONPLANE = "cronplane"
+    PREPARE = "prepare"
     UNIT = "unit"
     AUDIT = "audit"
     LICENCES = "licences"
@@ -322,6 +323,35 @@ def _pytest(
     )
 
 
+def prepare(ctx: Context) -> list[Command]:
+    """Everything the tests take from the network, taken before them: the
+    environment of each version and the test tools the kit pins. No test
+    runs. The steps after it then run with the network closed."""
+    commands: list[Command] = []
+    for version in ctx.versions:
+        commands.append(_sync(ctx, version))
+        commands.append(
+            Command(
+                [
+                    "uv",
+                    "run",
+                    "--frozen",
+                    "--python",
+                    version,
+                    "--with",
+                    PYTEST,
+                    "--with",
+                    PYTEST_COV,
+                    "pytest",
+                    "--version",
+                ],
+                ctx.action,
+                {"UV_PROJECT_ENVIRONMENT": str(environment(ctx, version))},
+            )
+        )
+    return commands
+
+
 def unit(ctx: Context) -> list[Command]:
     """The tests that need no service (`-m "not integration"`), once per
     version. The action's coverage threshold (`fail_under`) applies here,
@@ -489,6 +519,7 @@ STEPS = {
     Step.LINT: lint,
     Step.TYPES: types,
     Step.CRONPLANE: cronplane,
+    Step.PREPARE: prepare,
     Step.UNIT: unit,
     Step.AUDIT: audit,
     Step.LICENCES: licences,

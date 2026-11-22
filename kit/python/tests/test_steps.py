@@ -233,3 +233,13 @@ def test_a_matrix_without_usable_version_stops_the_types(
 ) -> None:
     with pytest.raises(StepError, match=message):
         STEPS[Step.TYPES](Context(ctx.action, ctx.cronplane, ctx.kit, ctx.work, versions))
+
+
+def test_prepare_takes_from_the_network_what_the_tests_need_and_runs_none(ctx: Context) -> None:
+    commands = STEPS[Step.PREPARE](ctx)
+    assert [c.argv[1] for c in commands] == ["sync", "run", "sync", "run"]
+    tools = [c for c in commands if c.argv[1] == "run"]
+    assert all(list(c.argv[-2:]) == ["pytest", "--version"] for c in tools), "no test runs"
+    assert all(PYTEST in c.argv and PYTEST_COV in c.argv for c in tools)
+    assert [c.env["UV_PROJECT_ENVIRONMENT"].rsplit("-", 1)[1] for c in tools] == ["3.12", "3.13"]
+    assert list(Step).index(Step.PREPARE) < list(Step).index(Step.UNIT)

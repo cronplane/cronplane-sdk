@@ -13,7 +13,7 @@ import { flowsOf, type Level, type Plan, variables } from "./plan.ts";
 import { checkSources } from "./sources.ts";
 
 /** The steps, in the order they run; the same as the Python adapter's. */
-export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "unit", "audit", "licences", "e2e", "integration", "regression"] as const;
+export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "prepare", "unit", "audit", "licences", "e2e", "integration", "regression"] as const;
 export type Step = (typeof STEPS)[number];
 
 /** A program and its arguments (never a shell line), its directory, the variables added. */
@@ -241,6 +241,11 @@ const builds: Readonly<Record<Step, Build>> = {
       env: { CRONPLANE_KIT_TSCONFIG: tsconfig(ctx)[0] },
       writes: [tsconfig(ctx)],
     },
+  ],
+  // Everything the tests take from the network, taken before them: no test runs.
+  prepare: (ctx) => [
+    { argv: ["bun", "install", "--frozen-lockfile"], cwd: ctx.action },
+    ...ctx.versions.map((version) => ({ argv: ["mise", "exec", `bun@${version}`, "--", "bun", "--version"], cwd: ctx.action })),
   ],
   // The threshold of Bun applies where every test runs: here, unless some need a service.
   unit: (ctx) => {
