@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { flowsOf, NO_PLAN, parsePlan, type Plan, PlanError } from "./plan.ts";
 import { describe, parseReport, type Report, ReportError } from "./report.ts";
 import { type Runner, runner } from "./run.ts";
-import { before, build, type Command, type Context, type Previous, SERVICES, show, type Step, StepError, STEPS } from "./steps.ts";
+import { before, build, type Command, type Context, type Ended, type Previous, SERVICES, sheet, show, type Step, StepError, STEPS } from "./steps.ts";
 
 /** The kit's folder: `ts/src/cli.ts` is in it. */
 export const KIT = resolve(dirname(import.meta.dir), "..");
@@ -23,7 +23,10 @@ export interface Options {
   readonly say?: (line: string) => void;
 }
 
-/** Runs the steps on the action of `ctx`; true when every one passed. */
+/**
+ * Runs the steps on the action of `ctx`; true when every one passed. The sheet of the action is
+ * said after every step was asked, or when its JSON is kept.
+ */
 export function check(ctx: Context, run: Runner, options: Options): boolean {
   const say = options.say ?? ((line: string) => { console.log(line); });
   const report = validate(ctx, run, say);
@@ -61,23 +64,36 @@ export function check(ctx: Context, run: Runner, options: Options): boolean {
     ...(report.requiresCronplane === undefined ? {} : { requiresCronplane: report.requiresCronplane }),
     ...(previous === undefined ? {} : { previous }),
   };
-  for (const step of options.steps.filter((s) => s !== "validate")) {
+  const ended = runSteps(context, run, options.steps, say);
+  if (context.sheet !== undefined || STEPS.every((step) => options.steps.includes(step))) {
+    say(run(sheet(context, ended)).output.trimEnd());
+  }
+  return ![...ended.values()].includes("failed");
+}
+
+/** Runs the steps in order, up to the first that fails or cannot be built; how each one ended. */
+function runSteps(ctx: Context, run: Runner, steps: readonly Step[], say: (line: string) => void): Map<Step, Ended> {
+  const ended = new Map<Step, Ended>([["validate", "passed"]]);
+  for (const step of steps.filter((s) => s !== "validate")) {
     let commands;
     try {
-      commands = build(step, context);
+      commands = build(step, ctx);
     } catch (e) {
       if (!(e instanceof StepError)) {
         throw e;
       }
       say(`✗ ${step}: ${e.message}`);
-      return false;
+      ended.set(step, "failed");
+      break;
     }
     if (!runStep(step, commands, run, say)) {
-      return false;
+      ended.set(step, "failed");
+      break;
     }
-    say(`✓ ${step}${count(step, context)}`);
+    ended.set(step, "passed");
+    say(`✓ ${step}${count(step, ctx)}`);
   }
-  return true;
+  return ended;
 }
 
 /** What a level ran, after its name: its flows, and its services. */
@@ -171,7 +187,7 @@ function validate(ctx: Context, run: Runner, say: (line: string) => void): Repor
 /** The command line; the exit code it ends with. */
 export function main(argv: readonly string[], environment: Readonly<Record<string, string | undefined>>): number {
   const usage =
-    "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running] [--previous FOLDER [--from X.Y.Z] [--to X.Y.Z]]";
+    "usage: cronplane-kit-ts check <action> [--version X] [--step S]… [--sbom FILE] [--services start|running] [--previous FOLDER [--from X.Y.Z] [--to X.Y.Z]] [--sheet FILE]";
   const { positionals, values } = parseArgs({
     args: [...argv],
     allowPositionals: true,
@@ -181,6 +197,7 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
       sbom: { type: "string" },
       services: { type: "string" },
       previous: { type: "string" },
+      sheet: { type: "string" },
       from: { type: "string" },
       to: { type: "string" },
       help: { type: "boolean" },
@@ -226,7 +243,7 @@ export function main(argv: readonly string[], environment: Readonly<Record<strin
   const work = mkdtempSync(join(tmpdir(), "cronplane-kit-"));
   try {
     const sbom = values.sbom === undefined ? {} : { sbom: resolve(values.sbom) };
-    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom, ...previous };
+    const ctx: Context = { action: resolve(folder), cronplane, kit: KIT, work, versions: [], plan: NO_PLAN, services, ...sbom, ...previous, ...(values.sheet === undefined ? {} : { sheet: resolve(values.sheet) }) };
     return check(ctx, runner(environment), { steps, ...(values.version === undefined ? {} : { version: values.version }) }) ? 0 : 1;
   } finally {
     rmSync(work, { recursive: true, force: true });

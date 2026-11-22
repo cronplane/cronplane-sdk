@@ -3,6 +3,7 @@ commands it runs. Building a command runs nothing."""
 
 from __future__ import annotations
 
+import json
 import sys
 import tomllib
 from collections.abc import Sequence
@@ -41,6 +42,15 @@ class Step(StrEnum):
     E2E = "e2e"
     INTEGRATION = "integration"
     REGRESSION = "regression"
+
+
+class Ended(StrEnum):
+    """How a step ended, as the sheet reads it."""
+
+    PASSED = "passed"
+    FAILED = "failed"
+    #: The checks stopped before it, or it was not asked.
+    NOT_RUN = "not_run"
 
 
 class OnFailure(StrEnum):
@@ -128,6 +138,8 @@ class Context:
     services: Services = Services.START
     #: The version before, for the regression step; none: the step runs nothing.
     previous: Previous | None = None
+    #: Where the sheet of the action is kept as JSON; none: it is not kept.
+    sheet: Path | None = None
 
 
 def tool(name: str, *args: str) -> list[str]:
@@ -210,6 +222,61 @@ def coverage_data(ctx: Context, version: str) -> Path:
     return ctx.work / f"coverage-{version}"
 
 
+def coverage_report(ctx: Context, version: str) -> Path:
+    """Where the tests of one version say what they covered, for the sheet."""
+    return ctx.work / f"coverage-{version}.json"
+
+
+def measured_coverage(ctx: Context) -> float | None:
+    """The coverage the tests of the newest version measured, in percent;
+    none before they ran."""
+    try:
+        report = json.loads(coverage_report(ctx, _newest(ctx)).read_text(encoding="utf-8"))
+    except (OSError, ValueError, StepError):
+        return None
+    percent = _table(_table(report).get("totals")).get("percent_covered")
+    if not isinstance(percent, int | float) or isinstance(percent, bool):
+        return None
+    return round(float(percent), 2)
+
+
+def sheet(ctx: Context, ended: dict[Step, Ended]) -> Command:
+    """`cronplane action sheet`: one line per check, from how each step ended."""
+    try:
+        coverage: dict[str, float | None] | None = {
+            "measured": measured_coverage(ctx),
+            "threshold": coverage_floor(ctx.action),
+        }
+    except StepError:
+        coverage = None
+    results = {
+        "version": 1,
+        "steps": {step.value: ended.get(step, Ended.NOT_RUN).value for step in Step},
+        "coverage": coverage,
+    }
+    file = ctx.work / "results.json"
+    before = [] if ctx.previous is None else ["--previous", str(ctx.previous.folder)]
+    numbers = [] if ctx.previous is None else ctx.previous.numbers()
+    kept = [] if ctx.sheet is None else ["--output", str(ctx.sheet)]
+    return Command(
+        [
+            str(ctx.cronplane),
+            "action",
+            "sheet",
+            str(ctx.action),
+            "--results",
+            str(file),
+            *before,
+            *numbers,
+            *kept,
+        ],
+        ctx.action,
+        writes=((file, json.dumps(results)),),
+        # A line that failed ends it in error: the steps already said so.
+        on_failure=OnFailure.REPORT,
+    )
+
+
 def _pytest(
     ctx: Context,
     version: str,
@@ -233,6 +300,7 @@ def _pytest(
             "--cov=.",
             "--cov-branch",
             "--cov-report=term-missing",
+            f"--cov-report=json:{coverage_report(ctx, version)}",
             *args,
         ],
         ctx.action,

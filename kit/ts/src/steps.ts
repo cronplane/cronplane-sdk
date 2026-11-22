@@ -80,7 +80,12 @@ export interface Context {
   readonly services: Services;
   /** The version before, for the regression step; none: the step runs nothing. */
   readonly previous?: Previous;
+  /** Where the sheet of the action is kept as JSON; none: it is not kept. */
+  readonly sheet?: string;
 }
+
+/** How a step ended, as the sheet reads it: `not_run` when the checks stopped before it, or it was not asked. */
+export type Ended = "passed" | "failed" | "not_run";
 
 export { StepError } from "./errors.ts";
 
@@ -122,6 +127,62 @@ export type Build = (ctx: Context) => readonly Command[];
 
 function bunTest(ctx: Context, version: string, args: readonly string[], env: Readonly<Record<string, string>> = {}): Command {
   return { argv: ["mise", "exec", `bun@${version}`, "--", "bun", "test", ...args], cwd: ctx.action, env };
+}
+
+/** Where the tests of one version say what they covered, for the sheet. */
+function coverageReport(ctx: Context, version: string): string {
+  return join(ctx.work, `coverage-${version}`);
+}
+
+/** What makes `bun test` measure the coverage, say it, and keep it for the sheet. */
+function measured(ctx: Context, version: string): readonly string[] {
+  return ["--coverage", "--coverage-reporter=text", "--coverage-reporter=lcov", `--coverage-dir=${coverageReport(ctx, version)}`];
+}
+
+/** The lines the tests of the newest version covered, in percent; none before they ran. */
+export function measuredCoverage(ctx: Context): number | undefined {
+  const newest = [...ctx.versions].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1);
+  if (newest === undefined) {
+    return undefined;
+  }
+  let report: string;
+  try {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- a file of the check's own directory
+    report = readFileSync(join(coverageReport(ctx, newest), "lcov.info"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const sum = (key: string): number =>
+    report
+      .split("\n")
+      .filter((line) => line.startsWith(`${key}:`))
+      .reduce((total, line) => total + Number(line.slice(key.length + 1)), 0);
+  const found = sum("LF");
+  return found > 0 ? Math.round((sum("LH") / found) * 10000) / 100 : undefined;
+}
+
+/** `cronplane action sheet`: one line per check, from how each step ended. */
+export function sheet(ctx: Context, ended: ReadonlyMap<Step, Ended>): Command {
+  const floor = readFloor(ctx.action);
+  const coverage = floor instanceof StepError ? null : { measured: measuredCoverage(ctx) ?? null, threshold: Math.round(floor * 10000) / 100 };
+  const results = { version: 1, steps: Object.fromEntries(STEPS.map((step) => [step, ended.get(step) ?? "not_run"])), coverage };
+  const file = join(ctx.work, "results.json");
+  return {
+    argv: [
+      ctx.cronplane,
+      "action",
+      "sheet",
+      ctx.action,
+      "--results",
+      file,
+      ...(ctx.previous === undefined ? [] : before(ctx.previous)),
+      ...(ctx.sheet === undefined ? [] : ["--output", ctx.sheet]),
+    ],
+    cwd: ctx.action,
+    writes: [[file, JSON.stringify(results)]],
+    // A line that failed ends it in error: the steps already said so.
+    onFailure: "report",
+  };
 }
 
 /** What Bun takes as a test file. */
@@ -180,7 +241,7 @@ const builds: Readonly<Record<Step, Build>> = {
     coverageFloor(ctx.action);
     const { unit, integration } = testFiles(ctx.action);
     if (integration.length === 0) {
-      return ctx.versions.map((version) => bunTest(ctx, version, ["--coverage"]));
+      return ctx.versions.map((version) => bunTest(ctx, version, measured(ctx, version)));
     }
     if (flowsOf(ctx.plan, "integration").length === 0) {
       throw new StepError(
@@ -229,7 +290,7 @@ const builds: Readonly<Record<Step, Build>> = {
     const tests =
       testFiles(ctx.action).integration.length === 0
         ? []
-        : ctx.versions.map((version) => bunTest(ctx, version, ["--coverage"], variables(ctx.plan)));
+        : ctx.versions.map((version) => bunTest(ctx, version, measured(ctx, version), variables(ctx.plan)));
     const flows = [...tests, cronplaneTest(ctx, "integration")];
     if (ctx.services === "running") {
       return flows;
@@ -273,21 +334,30 @@ export function build(step: Step, ctx: Context): readonly Command[] {
   return new Map(Object.entries(builds)).get(step)?.(ctx) ?? [];
 }
 
-/** The action's coverage threshold (`bunfig.toml`): required, it never goes down. */
-export function coverageFloor(action: string): number {
+/** The action's coverage threshold (`bunfig.toml`), or why it cannot be read. */
+function readFloor(action: string): number | StepError {
   let config: unknown;
   try {
     config = Bun.TOML.parse(read(action, "bunfig.toml"));
   } catch (e) {
-    throw new StepError(`bunfig.toml: ${String(e)}`, { cause: e });
+    return new StepError(`bunfig.toml: ${String(e)}`, { cause: e });
   }
   const test = field(config, "test");
   const threshold = field(test, "coverageThreshold");
   const lines = typeof threshold === "number" ? threshold : field(threshold, "lines");
   if (typeof lines !== "number" || lines <= 0) {
-    throw new StepError("bunfig.toml: [test] coverageThreshold is required (the coverage measured, which never goes down)");
+    return new StepError("bunfig.toml: [test] coverageThreshold is required (the coverage measured, which never goes down)");
   }
   return lines;
+}
+
+/** The action's coverage threshold (`bunfig.toml`): required, it never goes down. */
+export function coverageFloor(action: string): number {
+  const floor = readFloor(action);
+  if (floor instanceof StepError) {
+    throw floor;
+  }
+  return floor;
 }
 
 function field(value: unknown, name: string): unknown {

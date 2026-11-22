@@ -31,6 +31,8 @@ The steps run in order. The first failure stops them and shows its output.
 
 The levels say what they ran: `✓ e2e: 2 flows`, `✓ integration: 1 flow, services: postgres`, or `not provided` for a level the action has no flow of.
 
+After the steps, the kit says the sheet of the action (`cronplane action sheet`): one line per check, in the sections the hub shows (tests, compatibility, analysis, network and secrets, examples), each `✓`, `✗`, not provided, not applicable or not run. It is said when every step was asked, and `--sheet <file>` keeps it as JSON (and says it for a part of the steps too). The kit gives it how each step ended and the coverage the tests of the newest version measured.
+
 A test of the language that needs a service has the mark `integration` (`@pytest.mark.integration`, declared in `pyproject.toml`). Such a test without an integration flow is an error: nothing would start its service, and it would never run. It reads the test values of the integration flows in its environment, each secret in uppercase: `test.secrets.postgres_url` of a flow is `POSTGRES_URL`. Two flows that give two values to one name are an error. A value that holds the address of a double (`${doubles.<name>.url}`) is not given: it is not known before its flow runs.
 
 `--services running` leaves the services alone: they listen already, the kit starts and stops nothing. For a machine without Docker; never on the hub.

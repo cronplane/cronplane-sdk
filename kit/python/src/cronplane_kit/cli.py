@@ -18,6 +18,7 @@ from .steps import (
     STEPS,
     Command,
     Context,
+    Ended,
     OnFailure,
     Previous,
     Services,
@@ -25,6 +26,7 @@ from .steps import (
     StepError,
     When,
 )
+from .steps import sheet as steps_sheet
 
 #: The kit's folder: `python/src/cronplane_kit/cli.py` is in it.
 KIT = Path(__file__).resolve().parents[3]
@@ -52,7 +54,9 @@ def check(
     version: str | None = None,
     say: Callable[[str], None] = print,
 ) -> bool:
-    """Runs `steps` on the action of `ctx`; True when every one passed."""
+    """Runs `steps` on the action of `ctx`; True when every one passed. The
+    sheet of the action is said after every step was asked, or when its JSON
+    is kept."""
     action = ctx.action
     report = _validate(ctx, run, say)
     if report is None:
@@ -80,11 +84,19 @@ def check(
         plan=plan,
         previous=previous,
     )
-    return _steps(ctx, run, steps, say)
+    ended = _steps(ctx, run, steps, say)
+    if ctx.sheet is not None or set(steps) == set(Step):
+        outcome = run(steps_sheet(ctx, ended))
+        say(outcome.output.rstrip("\n"))
+    return Ended.FAILED not in ended.values()
 
 
-def _steps(ctx: Context, run: Runner, steps: Sequence[Step], say: Callable[[str], None]) -> bool:
-    """Runs `steps` in order; False at the first that fails or cannot be built."""
+def _steps(
+    ctx: Context, run: Runner, steps: Sequence[Step], say: Callable[[str], None]
+) -> dict[Step, Ended]:
+    """Runs `steps` in order, up to the first that fails or cannot be built;
+    how each one ended."""
+    ended = {Step.VALIDATE: Ended.PASSED}
     for step in steps:
         if step is Step.VALIDATE:
             continue
@@ -92,11 +104,14 @@ def _steps(ctx: Context, run: Runner, steps: Sequence[Step], say: Callable[[str]
             commands = STEPS[step](ctx)
         except StepError as e:
             say(f"✗ {step}: {e}")
-            return False
+            ended[step] = Ended.FAILED
+            break
         if not _run_step(step, commands, run, say):
-            return False
+            ended[step] = Ended.FAILED
+            break
+        ended[step] = Ended.PASSED
         say(f"✓ {step}{_count(step, ctx)}")
-    return True
+    return ended
 
 
 def _count(step: Step, ctx: Context) -> str:
@@ -200,6 +215,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="the folder of the version before: the regression step compares the contracts "
         "and runs its test flows against the action",
     )
+    checking.add_argument(
+        "--sheet", type=Path, help="keep the sheet of the action there (JSON), and say it"
+    )
     checking.add_argument("--from", dest="number", help="the number of the version before (X.Y.Z)")
     checking.add_argument("--to", dest="next_number", help="the number of the version checked")
     args = parser.parse_args(argv)
@@ -217,6 +235,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             work=Path(work),
             sbom=sbom,
             services=Services(args.services),
+            sheet=Path(args.sheet).resolve() if args.sheet else None,
             previous=None
             if args.previous is None
             else Previous(Path(args.previous).resolve(), args.number, args.next_number),

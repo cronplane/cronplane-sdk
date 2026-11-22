@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { check, KIT, main } from "../src/cli.ts";
 import { type Outcome, runner } from "../src/run.ts";
-import { type Command, type Previous, type Services, show, type Step, STEPS } from "../src/steps.ts";
+import { type Command, type Ended, measuredCoverage, type Previous, type Services, sheet, show, type Step, STEPS } from "../src/steps.ts";
 import { NO_PLAN } from "../src/plan.ts";
 import { action, context, plan, report } from "./helpers.ts";
 
@@ -83,7 +83,7 @@ test("an advisory on what the action installs fails the audit", () => {
 
 test("one version of the matrix for a CI job", () => {
   const one = runCheck(report({ versions: ["1.3", "1.4"] }), ["unit"], { version: "1.4" });
-  expect(one.ran.filter((command) => command.includes("bun test"))).toEqual(["mise exec bun@1.4 -- bun test --coverage"]);
+  expect(one.ran.filter((command) => command.includes("bun test")).map((command) => command.split(" --coverage")[0])).toEqual(["mise exec bun@1.4 -- bun test"]);
   const other = runCheck(report({ versions: ["1.3", "1.4"] }), ["unit"], { version: "1.1" });
   expect([other.ok, other.said.at(-1)]).toEqual([false, "--version 1.1: not in the action's matrix (1.3, 1.4)"]);
 });
@@ -133,6 +133,7 @@ test("the command line checks an action with the cronplane given", () => {
   expect(main(["check", folder, "--step", "nope"], environment)).toBe(2);
   expect(main(["check", folder, "--step", "e2e", "--services", "running"], environment)).toBe(0);
   expect(main(["check", folder, "--step", "e2e", "--services", "later"], environment)).toBe(2);
+  expect(main(["check", folder, "--step", "e2e", "--sheet", join(folder, "..", "sheet.json")], environment)).toBe(0);
   const before = ["--previous", join(folder, "..", "v1"), "--from", "1.4.2", "--to", "1.5.0"];
   expect(main(["check", folder, "--step", "regression", ...before], environment)).toBe(0);
   expect(main(["check", folder, "--step", "regression", "--previous", join(folder, "..", "v1")], environment)).toBe(0);
@@ -241,4 +242,50 @@ test("a version before without a flow that runs only compares the contracts", ()
   const unread = runCheck(report(), ["regression"], { previous: V1, failing: "--plan" });
   expect(unread.ok).toBe(false);
   expect(unread.said.at(-1)?.startsWith("✗ test flows: /bin/cronplane test")).toBe(true);
+});
+
+test("after every step, the sheet of the action is said", () => {
+  const whole = runCheck(report(), STEPS);
+  expect(whole.ok).toBe(true);
+  expect(whole.ran.at(-1)).toBe(`/bin/cronplane action sheet ${whole.action} --results ${join(whole.work, "results.json")}`);
+  expect(whole.said.at(-2)).toBe("✓ regression: not provided");
+  const part = runCheck(report(), ["lint"]);
+  expect(part.ran.some((command) => command.includes("action sheet"))).toBe(false);
+});
+
+test("the sheet is said and kept even when a step failed", () => {
+  const folder = action();
+  const said: string[] = [];
+  const runs = fake(report(), "eslint");
+  const ctx = { ...context(folder, []), sheet: "/kept/sheet.json" };
+  expect(check(ctx, runs.run, { steps: ["types", "lint", "unit"], say: (line) => said.push(line) })).toBe(false);
+  expect(runs.ran.at(-1)?.endsWith("--output /kept/sheet.json")).toBe(true);
+});
+
+test("the results say how each step ended and what was covered", () => {
+  const folder = action();
+  const ctx = { ...context(folder), previous: { ...V1, number: "1.4.2", nextNumber: "1.5.0" } };
+  const ended = new Map<Step, Ended>([["validate", "passed"], ["lockfile", "passed"], ["types", "failed"]]);
+  const command = sheet(ctx, ended);
+  const file = join(ctx.work, "results.json");
+  expect(command.argv.slice(4)).toEqual(["--results", file, "--previous", "/src/v1", "--from", "1.4.2", "--to", "1.5.0"]);
+  expect(command.onFailure).toBe("report");
+  const results = (text: string | undefined): unknown => JSON.parse(text ?? "");
+  expect(command.writes?.[0]?.[0]).toBe(file);
+  expect(results(command.writes?.[0]?.[1])).toEqual({
+    version: 1,
+    steps: { ...Object.fromEntries(STEPS.map((step) => [step, "not_run"])), validate: "passed", lockfile: "passed", types: "failed" },
+    coverage: { measured: null, threshold: 90 },
+  });
+
+  const lcov = join(ctx.work, "coverage-1.4");
+  mkdirSync(lcov, { recursive: true });
+  writeFileSync(join(lcov, "lcov.info"), "SF:a.ts\nLF:30\nLH:29\nend_of_record\nSF:b.ts\nLF:10\nLH:10\nend_of_record\n");
+  expect(measuredCoverage(ctx)).toBe(97.5);
+  writeFileSync(join(lcov, "lcov.info"), "TN:\n");
+  expect(measuredCoverage(ctx)).toBeUndefined();
+  expect(measuredCoverage({ ...ctx, versions: [] })).toBeUndefined();
+
+  writeFileSync(join(folder, "bunfig.toml"), "[test]\n");
+  expect(results(sheet(ctx, ended).writes?.[0]?.[1])).toMatchObject({ coverage: null });
 });

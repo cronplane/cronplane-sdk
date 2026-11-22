@@ -33,10 +33,16 @@ test("the rules are the kit's whatever the action configures", () => {
   expect(lint?.env?.["CRONPLANE_KIT_TSCONFIG"]).toBe(join(folder, "..", "work", "tsconfig.json"));
 });
 
-test("unit tests run once per Bun version of the matrix", () => {
-  expect(argv("unit", action())).toEqual([
-    ["mise", "exec", "bun@1.3", "--", "bun", "test", "--coverage"],
-    ["mise", "exec", "bun@1.4", "--", "bun", "test", "--coverage"],
+/** What makes `bun test` of one version measure the coverage and keep it for the sheet. */
+function measured(folder: string, version: string): string[] {
+  return ["--coverage", "--coverage-reporter=text", "--coverage-reporter=lcov", `--coverage-dir=${join(folder, "..", "work", `coverage-${version}`)}`];
+}
+
+test("unit tests run once per Bun version of the matrix, and keep what they covered", () => {
+  const folder = action();
+  expect(argv("unit", folder)).toEqual([
+    ["mise", "exec", "bun@1.3", "--", "bun", "test", ...measured(folder, "1.3")],
+    ["mise", "exec", "bun@1.4", "--", "bun", "test", ...measured(folder, "1.4")],
   ]);
 });
 
@@ -57,7 +63,7 @@ test("the tests that need a service run at the integration level, the others twi
     ["mise", "exec", "bun@1.4", "--", "bun", "test", "./b.test.ts", "./src/a_spec.js"],
   ]);
   const [, first, second, third] = build("integration", ctx);
-  expect([first?.argv, first?.env]).toEqual([["mise", "exec", "bun@1.3", "--", "bun", "test", "--coverage"], { POSTGRES_URL: "postgresql://x" }]);
+  expect([first?.argv, first?.env]).toEqual([["mise", "exec", "bun@1.3", "--", "bun", "test", ...measured(folder, "1.3")], { POSTGRES_URL: "postgresql://x" }]);
   expect(second?.argv.at(2)).toBe("bun@1.4");
   expect(third?.argv.slice(3, 5)).toEqual(["--level", "integration"]);
 

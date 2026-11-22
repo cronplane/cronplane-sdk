@@ -1,14 +1,16 @@
 """The checks of an action, in order, the first failure stopping them."""
 
+import json
 import runpy
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from cronplane_kit.cli import KIT, Config, check, main
 from cronplane_kit.run import Outcome, runner
-from cronplane_kit.steps import Command, Context, Previous, Services, Step
+from cronplane_kit.steps import Command, Context, Ended, Previous, Services, Step, sheet
 
 from .conftest import plan, report
 
@@ -339,3 +341,76 @@ def test_the_command_line_takes_the_version_before_and_its_numbers(
     with pytest.raises(SystemExit) as refused:
         main(["check", str(action), "--step", "regression", "--from", "1.4.2"])
     assert refused.value.code == 2
+
+
+def test_after_every_step_the_sheet_of_the_action_is_said(action: Path) -> None:
+    fake = Fake(report())
+    said: list[str] = []
+    ctx = Context(action, Path("/bin/cronplane"), KIT, action.parent / "work")
+    assert check(ctx, fake, steps=list(Step), say=said.append)
+    results = action.parent / "work" / "results.json"
+    assert fake.ran[-1] == f"/bin/cronplane action sheet {action} --results {results}"
+    assert said[-2] == "✓ regression: not provided"
+
+    part = Fake(report())
+    assert check(ctx, part, steps=[Step.LINT], say=said.append)
+    assert not any("action sheet" in c for c in part.ran), "a part of the steps gives no sheet"
+
+
+def test_the_sheet_is_said_and_kept_even_when_a_step_failed(action: Path, tmp_path: Path) -> None:
+    fake = Fake(report(), failing="ruff check")
+    said: list[str] = []
+    ctx = Context(
+        action, Path("/bin/cronplane"), KIT, action.parent / "work", sheet=tmp_path / "sheet.json"
+    )
+    assert not check(ctx, fake, steps=[Step.FORMAT, Step.LINT, Step.UNIT], say=said.append)
+    assert fake.ran[-1].endswith(f"--output {tmp_path / 'sheet.json'}")
+
+
+def test_the_results_say_how_each_step_ended_and_what_was_covered(
+    action: Path, tmp_path: Path
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    before = Previous(tmp_path / "v1", "1.4.2", "1.5.0")
+    ctx = Context(action, Path("/bin/cronplane"), KIT, work, ("3.12", "3.13"), previous=before)
+    ended = {Step.VALIDATE: Ended.PASSED, Step.LOCKFILE: Ended.PASSED, Step.FORMAT: Ended.FAILED}
+    command = sheet(ctx, ended)
+    assert list(command.argv[4:]) == [
+        "--results",
+        str(work / "results.json"),
+        "--previous",
+        str(tmp_path / "v1"),
+        "--from",
+        "1.4.2",
+        "--to",
+        "1.5.0",
+    ]
+    ((path, text),) = command.writes
+    results = json.loads(text)
+    assert path == work / "results.json"
+    assert results["version"] == 1
+    assert set(results["steps"]) == {step.value for step in Step}
+    assert results["steps"]["lockfile"] == "passed"
+    assert results["steps"]["format"] == "failed"
+    assert results["steps"]["unit"] == "not_run"
+    assert results["coverage"] == {"measured": None, "threshold": 90.0}
+
+    (work / "coverage-3.13.json").write_text('{"totals": {"percent_covered": 97.456}}')
+    assert json.loads(sheet(ctx, ended).writes[0][1])["coverage"]["measured"] == 97.46
+    (work / "coverage-3.13.json").write_text('{"totals": {"percent_covered": "high"}}')
+    assert json.loads(sheet(ctx, ended).writes[0][1])["coverage"]["measured"] is None
+    (work / "coverage-3.13.json").write_text("not json")
+    assert json.loads(sheet(ctx, ended).writes[0][1])["coverage"]["measured"] is None
+
+    (action / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+    assert json.loads(sheet(replace(ctx, versions=()), ended).writes[0][1])["coverage"] is None
+
+
+def test_the_command_line_keeps_the_sheet_where_it_is_asked(
+    action: Path, cronplane: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRONPLANE_BIN", str(cronplane))
+    with pytest.raises(SystemExit) as done:
+        main(["check", str(action), "--step", "e2e", "--sheet", str(tmp_path / "sheet.json")])
+    assert done.value.code == 0
