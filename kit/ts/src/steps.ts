@@ -4,15 +4,16 @@
  * action's files).
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import { StepError } from "./errors.ts";
 import { checkBounds } from "./bounds.ts";
+import { flowsOf, type Level, type Plan, variables } from "./plan.ts";
 import { checkSources } from "./sources.ts";
 
 /** The steps, in the order they run; the same as the Python adapter's. */
-export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "tests", "audit", "licences", "flows"] as const;
+export const STEPS = ["validate", "lockfile", "types", "cronplane", "lint", "unit", "audit", "licences", "e2e", "integration"] as const;
 export type Step = (typeof STEPS)[number];
 
 /** A program and its arguments (never a shell line), its directory, the variables added. */
@@ -24,7 +25,16 @@ export interface Command {
   readonly writes?: readonly (readonly [string, string])[];
   /** What its failure does: it stops the checks (`stop`, the default), or it is only said (`report`). */
   readonly onFailure?: "stop" | "report";
+  /**
+   * When it runs in its step: after the commands before it, while none failed
+   * (`in order`, the default), or whatever failed (`always`: what stops the services).
+   */
+  readonly when?: "in order" | "always";
 }
+
+/** Who starts the services of the integration level: the kit (and it stops them), or they listen already. */
+export const SERVICES = ["start", "running"] as const;
+export type Services = (typeof SERVICES)[number];
 
 export function show(command: Command): string {
   return command.argv.join(" ");
@@ -43,6 +53,9 @@ export interface Context {
   readonly sbom?: string;
   /** The oldest Cronplane the action says it runs on (from the report). */
   readonly requiresCronplane?: string;
+  /** Its test flows (from `cronplane test --plan`). */
+  readonly plan: Plan;
+  readonly services: Services;
 }
 
 export { StepError } from "./errors.ts";
@@ -75,12 +88,51 @@ function tsconfig(ctx: Context): readonly [string, string] {
   const config = {
     compilerOptions: { ...COMPILER_OPTIONS, typeRoots: [join(ctx.kit, "ts", "node_modules", "@types")] },
     include: [join(ctx.action, "**", "*.ts")],
-    exclude: [join(ctx.action, "node_modules")],
+    // `.cronplane`: the runs `cronplane run` keeps there.
+    exclude: [join(ctx.action, "node_modules"), join(ctx.action, ".cronplane")],
   };
   return [join(ctx.work, "tsconfig.json"), JSON.stringify(config)];
 }
 
 export type Build = (ctx: Context) => readonly Command[];
+
+function bunTest(ctx: Context, version: string, args: readonly string[], env: Readonly<Record<string, string>> = {}): Command {
+  return { argv: ["mise", "exec", `bun@${version}`, "--", "bun", "test", ...args], cwd: ctx.action, env };
+}
+
+/** What Bun takes as a test file. */
+const TEST_FILE = /[._](test|spec)\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/;
+/** How a test of the language that needs a service of the integration level ends. */
+const INTEGRATION_FILE = ".integration.test.ts";
+
+/**
+ * The test files of an action, as paths Bun runs (`./a/b.test.ts`), sorted:
+ * those that need a service (`*.integration.test.ts`) apart from the others.
+ */
+export function testFiles(action: string): { readonly unit: readonly string[]; readonly integration: readonly string[] } {
+  const found: string[] = [];
+  const visit = (directory: string): void => {
+    // eslint-disable-next-line security/detect-non-literal-fs-filename -- a folder of the action checked
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name !== "node_modules" && !entry.name.startsWith(".")) {
+        visit(join(directory, entry.name));
+      } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
+        found.push(`./${relative(action, join(directory, entry.name))}`);
+      }
+    }
+  };
+  visit(action);
+  found.sort();
+  return {
+    unit: found.filter((file) => !file.endsWith(INTEGRATION_FILE)),
+    integration: found.filter((file) => file.endsWith(INTEGRATION_FILE)),
+  };
+}
+
+/** The flows of one level; their runs are kept out of the action's folder, which the other steps read. */
+function cronplaneTest(ctx: Context, level: Level): Command {
+  return { argv: [ctx.cronplane, "test", ctx.action, "--level", level, "--runs-dir", join(ctx.work, "runs")], cwd: ctx.action };
+}
 
 const builds: Readonly<Record<Step, Build>> = {
   validate: (ctx) => [{ argv: [ctx.cronplane, "action", "validate", ctx.action, "--hub", "--json"], cwd: ctx.action }],
@@ -99,12 +151,19 @@ const builds: Readonly<Record<Step, Build>> = {
       writes: [tsconfig(ctx)],
     },
   ],
-  tests: (ctx) => {
+  // The threshold of Bun applies where every test runs: here, unless some need a service.
+  unit: (ctx) => {
     coverageFloor(ctx.action);
-    return ctx.versions.map((version) => ({
-      argv: ["mise", "exec", `bun@${version}`, "--", "bun", "test", "--coverage"],
-      cwd: ctx.action,
-    }));
+    const { unit, integration } = testFiles(ctx.action);
+    if (integration.length === 0) {
+      return ctx.versions.map((version) => bunTest(ctx, version, ["--coverage"]));
+    }
+    if (flowsOf(ctx.plan, "integration").length === 0) {
+      throw new StepError(
+        `${integration[0] ?? ""} needs a service: an integration flow (tests/flows, level: integration) names it, or the test is never run`,
+      );
+    }
+    return unit.length === 0 ? [] : ctx.versions.map((version) => bunTest(ctx, version, unit));
   },
   audit: (ctx) => {
     // `bun audit` knows the registry only.
@@ -131,20 +190,32 @@ const builds: Readonly<Record<Step, Build>> = {
       },
     ];
   },
-  flows: (ctx) => {
-    const directory = join(ctx.action, "tests", "flows");
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- a folder of the action checked
-    if (!existsSync(directory)) {
+  e2e: (ctx) => {
+    if (ctx.plan.flows.length === 0) {
+      throw new StepError("an action has one test flow at least: tests/flows/<name>.yaml with a test: block");
+    }
+    return flowsOf(ctx.plan, "e2e").length === 0 ? [] : [cronplaneTest(ctx, "e2e")];
+  },
+  // A service that does not start fails the step: a test is never skipped.
+  integration: (ctx) => {
+    if (flowsOf(ctx.plan, "integration").length === 0) {
       return [];
     }
-    const secrets = join(directory, "secrets.env");
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- a file of the action checked
-    const extra = existsSync(secrets) ? ["--secret-file", secrets] : [];
-    // eslint-disable-next-line security/detect-non-literal-fs-filename -- a folder of the action checked
-    return readdirSync(directory)
-      .filter((name) => name.endsWith(".yaml"))
-      .sort()
-      .map((name) => ({ argv: [ctx.cronplane, "run", join(directory, name), ...extra], cwd: ctx.action }));
+    // Bun does not add a coverage to another: every test runs again, under its threshold.
+    const tests =
+      testFiles(ctx.action).integration.length === 0
+        ? []
+        : ctx.versions.map((version) => bunTest(ctx, version, ["--coverage"], variables(ctx.plan)));
+    const flows = [...tests, cronplaneTest(ctx, "integration")];
+    if (ctx.services === "running") {
+      return flows;
+    }
+    const compose = ["docker", "compose", "-f", join(ctx.action, "tests", "compose.yaml")];
+    return [
+      { argv: [...compose, "up", "-d", "--wait", ...ctx.plan.services], cwd: ctx.action },
+      ...flows,
+      { argv: [...compose, "down", "-v"], cwd: ctx.action, when: "always" },
+    ];
   },
 };
 

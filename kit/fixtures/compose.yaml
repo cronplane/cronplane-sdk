@@ -1,28 +1,32 @@
-# The services an action's tests and flows talk to, one profile each:
-#   docker compose -f fixtures/compose.yaml --profile postgres --profile s3 up -d --wait
-# Images pinned by digest (tag kept for reading); ports on 127.0.0.1 only;
-# test credentials only, never real ones. The secrets an action's flows get:
-# fixtures/secrets.env.
-
-name: cronplane-fixtures
+# Services for the integration level of an action: a model. Copy the ones
+# your action needs into its tests/compose.yaml, and name them in
+# `test.services` of its integration flows. It keeps to what Cronplane allows
+# there: images with a tag and a digest, ports on 127.0.0.1 only, volumes
+# read-only from tests/, test credentials only, never real ones.
+#
+# The test values to write in `test.secrets` of a flow:
+#   postgres  postgresql://fixture:fixture@127.0.0.1:55432/fixture
+#   mysql     mysql://fixture:fixture@127.0.0.1:53306/fixture
+#   mariadb   mysql://fixture:fixture@127.0.0.1:53307/fixture
+#   s3        http://127.0.0.1:58333 (access key fixture, secret key fixture-secret)
+#   mailpit   smtp://127.0.0.1:51025
+#   sftp      sftp://fixture:fixture@127.0.0.1:52222/upload
+#   gitlab    http://127.0.0.1:58929
 
 services:
   postgres:
-    profiles: [postgres]
     image: docker.io/library/postgres:17@sha256:846a7ddaa67a4b354ae1d21087b683901aa6113a4ed626d3787cfbf6c85e3e07
     environment: {POSTGRES_USER: fixture, POSTGRES_PASSWORD: fixture, POSTGRES_DB: fixture}
     ports: ["127.0.0.1:55432:5432"]
     healthcheck: {test: ["CMD", "pg_isready", "-U", "fixture"], interval: 2s, retries: 30}
 
   mysql:
-    profiles: [mysql]
     image: docker.io/library/mysql:8.4@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902
     environment: {MYSQL_ROOT_PASSWORD: fixture, MYSQL_USER: fixture, MYSQL_PASSWORD: fixture, MYSQL_DATABASE: fixture}
     ports: ["127.0.0.1:53306:3306"]
     healthcheck: {test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pfixture"], interval: 2s, retries: 60}
 
   mariadb:
-    profiles: [mariadb]
     image: docker.io/library/mariadb:11.4@sha256:5e73baf8179b29f115101bb102763a47a017361f3e9792daccba6646c3ab1532
     environment: {MARIADB_ROOT_PASSWORD: fixture, MARIADB_USER: fixture, MARIADB_PASSWORD: fixture, MARIADB_DATABASE: fixture}
     ports: ["127.0.0.1:53307:3306"]
@@ -30,26 +34,22 @@ services:
 
   # S3: SeaweedFS (MinIO publishes no community image any more).
   s3:
-    profiles: [s3]
     image: docker.io/chrislusf/seaweedfs:4.50@sha256:c2658820e763294a9e9de7b36c81e59b879e3459148351aee4e31a126ca64860
     command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
     volumes: ["./seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro"]
     ports: ["127.0.0.1:58333:8333"]
 
   mailpit:
-    profiles: [mail]
     image: docker.io/axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498
     ports: ["127.0.0.1:51025:1025", "127.0.0.1:58025:8025"]
 
   sftp:
-    profiles: [sftp]
     image: docker.io/atmoz/sftp:alpine@sha256:c5fb9e4beb8b7054a4c0b65c5e11df47cc20da95ad6002e88aecff62bab06372
     command: ["fixture:fixture:::upload"]
     ports: ["127.0.0.1:52222:22"]
 
   # Heavy (several GiB, minutes to start): only for the actions that call GitLab.
   gitlab:
-    profiles: [gitlab]
     image: docker.io/gitlab/gitlab-ce:19.4.6-ce.0@sha256:d47c658e89dd015bddff7262787b2cbba338e32b643fc163cb92bdf6a1756726
     environment:
       GITLAB_ROOT_PASSWORD: fixture-password-9k2

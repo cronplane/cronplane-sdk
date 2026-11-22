@@ -45,6 +45,21 @@ def report(
     )
 
 
+def plan(*flows: tuple[str, str, dict[str, str]], services: tuple[str, ...] = ()) -> str:
+    """The JSON `cronplane test --plan --json` prints: a file, a level and the test
+    values of each flow."""
+    return json.dumps(
+        {
+            "version": 1,
+            "services": list(services),
+            "flows": [
+                {"file": f"tests/flows/{file}", "name": file, "level": level, "secrets": secrets}
+                for file, level, secrets in flows
+            ],
+        }
+    )
+
+
 @pytest.fixture
 def action(tmp_path: Path) -> Path:
     folder = tmp_path / "demo"
@@ -56,9 +71,14 @@ def action(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cronplane(tmp_path: Path) -> Path:
-    """Prints the report in `report.json` beside it, as `validate --json` does."""
+    """Prints the report in `report.json` beside it, as `validate --json` does, and
+    the plan in `plan.json` for `test … --plan`."""
     binary = tmp_path / "cronplane"
     (tmp_path / "report.json").write_text(report())
-    binary.write_text(f'#!/bin/sh\ncat "{tmp_path / "report.json"}"\n')
+    (tmp_path / "plan.json").write_text(plan(("hello.yaml", "e2e", {})))
+    binary.write_text(
+        f'#!/bin/sh\n[ "$1" = test ] && [ "$3" = --plan ] && exec cat "{tmp_path / "plan.json"}"\n'
+        f'cat "{tmp_path / "report.json"}"\n'
+    )
     binary.chmod(0o755)
     return binary

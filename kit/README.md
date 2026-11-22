@@ -9,6 +9,7 @@ export CRONPLANE_BIN=/path/to/cronplane     # the cronplane that checks actions
 uv run --project python cronplane-kit check path/to/action
 uv run --project python cronplane-kit check path/to/action --version 3.13   # one entry of the matrix (a CI job)
 uv run --project python cronplane-kit check path/to/action --step lint      # some steps only
+uv run --project python cronplane-kit check path/to/action --services running   # the services listen already
 ```
 
 The steps run in order. The first failure stops them and shows its output.
@@ -20,10 +21,17 @@ The steps run in order. The first failure stops them and shows its output.
 | `format`, `lint` | ruff with the kit's rules (`python/src/cronplane_kit/rules/ruff.toml`, security rules `S` included), whatever the action configures. |
 | `types` | pyright, strict, with the action's dependencies, on the newest version of the matrix. |
 | `cronplane` | `requires.cronplane` of `action.yaml` names a Cronplane as new as the one the library installed needs (`REQUIRES_CRONPLANE`). `validate` already requires every hub action to name one. |
-| `tests` | pytest with coverage on each version of the matrix, with the test tools the kit pins. `[tool.coverage.report] fail_under` is required: the coverage measured, which never goes down. |
+| `unit` | pytest on each version of the matrix, with the test tools the kit pins: the tests that need no service (`-m "not integration"`). `[tool.coverage.report] fail_under` is required: the coverage measured, which never goes down. It applies here, unless the action has an integration level: it then applies there, to what both steps covered. |
 | `audit` | pip-audit on the locked dependencies: a known advisory on what the action installs at run time fails. The advisories of its development tools are said (`! audit: …`), they do not fail the check. |
 | `licences` | The SBOM (Syft, SPDX) of what the action installs at run time, checked by grant against `licences/grant.yaml`. |
-| `flows` | `cronplane run` on each `tests/flows/*.yaml`, with `tests/flows/secrets.env` when there is one. |
+| `e2e` | `cronplane test --level e2e`: the test flows that need doubles only. An action has one test flow at least (`tests/flows/<name>.yaml` with a `test:` block). |
+| `integration` | With the services the integration flows name: `docker compose -f tests/compose.yaml up -d --wait <services>`, then the tests of the language marked `integration` (what they cover is added to what `unit` covered, and the action's coverage threshold applies to the sum; without `unit` before it in the same check, every test runs here), then `cronplane test --level integration`, then `docker compose … down -v`, whatever failed. A service that does not start fails the step: a test is never skipped. |
+
+The levels say what they ran: `✓ e2e: 2 flows`, `✓ integration: 1 flow, services: postgres`, or `not provided` for a level the action has no flow of.
+
+A test of the language that needs a service has the mark `integration` (`@pytest.mark.integration`, declared in `pyproject.toml`). Such a test without an integration flow is an error: nothing would start its service, and it would never run. It reads the test values of the integration flows in its environment, each secret in uppercase: `test.secrets.postgres_url` of a flow is `POSTGRES_URL`. Two flows that give two values to one name are an error. A value that holds the address of a double (`${doubles.<name>.url}`) is not given: it is not known before its flow runs.
+
+`--services running` leaves the services alone: they listen already, the kit starts and stops nothing. For a machine without Docker; never on the hub.
 
 ## Checking a TypeScript action
 
@@ -33,7 +41,9 @@ bun ts/src/cli.ts check path/to/action                  # every Bun version of t
 bun ts/src/cli.ts check path/to/action --version 1.4    # one entry of the matrix (a CI job)
 ```
 
-The same steps, for Bun: `lockfile` (each dependency of `package.json` with an upper bound: `^1.2.0`, `~1.2.0`, `>=0.1.1 <1.0.0`; then `bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `tests` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `flows`. There is no `format` step: no formatter is decided for TypeScript.
+The same steps, for Bun: `lockfile` (each dependency of `package.json` with an upper bound: `^1.2.0`, `~1.2.0`, `>=0.1.1 <1.0.0`; then `bun install --frozen-lockfile`), `types` (tsc, strict, the kit's configuration over the action's files), `cronplane` (the same check of `requires.cronplane`, asked to the library the `lockfile` step installed), `lint` (ESLint `strictTypeChecked` and security rules, `ts/rules/eslint.config.js`), `unit` (`bun test --coverage` on each Bun version, through `mise exec bun@X`; `[test] coverageThreshold` in `bunfig.toml` is required), `audit` (`bun audit --production` fails on a known advisory; `bun audit` then says those of the development tools, without failing), `licences` (on a `--production` install of the lockfile), `e2e`, `integration` (the services, then the integration flows, then the stop of the services).
+
+A test of the language that needs a service is in a file named `*.integration.test.ts`. Bun has no mark for it and does not add a coverage to another, so the two steps share the work this way: `unit` runs the other test files, without coverage; `integration` runs every test with coverage, under the threshold, with the test values of the integration flows in the environment. The tests that need no service run twice. An action without such a file keeps its threshold on `unit`. There is no `format` step: no formatter is decided for TypeScript.
 
 ## Licences
 
@@ -56,15 +66,11 @@ None: every package of an action comes from PyPI or npm, the libraries of Cronpl
 
 ## Templates
 
-`templates/python` and `templates/typescript`: an action complete and minimal (inputs, output, tests, README, lockfile, coverage threshold), using the library of its language. Copy one, rename the action, keep the checks; both pass every step.
+`templates/python` and `templates/typescript`: an action complete and minimal (inputs, output, tests, a test flow, README, lockfile, coverage threshold), using the library of its language. Copy one, rename the action, keep the checks; both pass every step.
 
-## Fixtures
+## Services
 
-`fixtures/compose.yaml`: the services an action's tests and flows talk to, one profile each (`postgres`, `mysql`, `mariadb`, `s3`, `mail`, `sftp`, `gitlab`), images pinned by digest, ports on 127.0.0.1, test credentials only. `fixtures/secrets.env` gives their addresses to `cronplane run --secret-file`.
-
-```sh
-docker compose -f fixtures/compose.yaml --profile postgres --profile s3 up -d --wait
-```
+`fixtures/compose.yaml` is a model of the services an integration level uses (`postgres`, `mysql`, `mariadb`, `s3`, `mailpit`, `sftp`, `gitlab`): images with a tag and a digest, ports on 127.0.0.1, test credentials only. Copy the ones an action needs into its `tests/compose.yaml`, name them in `test.services` of its integration flows, and write their addresses in `test.secrets` (the model lists them). `cronplane test --plan` checks the file against what Cronplane allows there.
 
 S3 is SeaweedFS: MinIO publishes no community image any more.
 

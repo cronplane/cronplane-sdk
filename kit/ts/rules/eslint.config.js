@@ -7,7 +7,8 @@ import tseslint from "typescript-eslint";
 
 const project = process.env.CRONPLANE_KIT_TSCONFIG;
 export default defineConfig(
-  { ignores: ["**/node_modules", "**/coverage"] },
+  // `.cronplane`: the runs `cronplane run` keeps in the folder of the action.
+  { ignores: ["**/node_modules", "**/coverage", "**/.cronplane"] },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
   security.configs.recommended,

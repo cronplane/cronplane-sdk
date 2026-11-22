@@ -13,7 +13,11 @@ from typing import cast
 
 from .bounds import check_bounds
 from .errors import StepError
+from .plan import NO_PLAN, Level, Plan
 from .sources import check_sources
+
+#: What pytest ends with when no test is selected.
+NO_TEST_COLLECTED = 5
 
 #: The test tools every action runs with, whatever its own lockfile pins.
 PYTEST = "pytest==9.2.0"
@@ -31,10 +35,11 @@ class Step(StrEnum):
     LINT = "lint"
     TYPES = "types"
     CRONPLANE = "cronplane"
-    TESTS = "tests"
+    UNIT = "unit"
     AUDIT = "audit"
     LICENCES = "licences"
-    FLOWS = "flows"
+    E2E = "e2e"
+    INTEGRATION = "integration"
 
 
 class OnFailure(StrEnum):
@@ -44,6 +49,24 @@ class OnFailure(StrEnum):
     STOP = "stop"
     #: It is only said.
     REPORT = "report"
+
+
+class When(StrEnum):
+    """When a command of a step runs."""
+
+    #: After the commands before it, while none failed.
+    IN_ORDER = "in order"
+    #: Whatever failed in its step: what stops the services.
+    ALWAYS = "always"
+
+
+class Services(StrEnum):
+    """Who starts the services of the integration level."""
+
+    #: The kit, with `docker compose`, and it stops them.
+    START = "start"
+    #: They listen already (`--services running`): the kit starts nothing.
+    RUNNING = "running"
 
 
 @dataclass(frozen=True)
@@ -57,6 +80,9 @@ class Command:
     #: Files written before it runs: path and text.
     writes: tuple[tuple[Path, str], ...] = ()
     on_failure: OnFailure = OnFailure.STOP
+    when: When = When.IN_ORDER
+    #: The exit codes that are not a failure.
+    passes: tuple[int, ...] = (0,)
 
     def __str__(self) -> str:
         return " ".join(self.argv)
@@ -77,6 +103,9 @@ class Context:
     sbom: Path | None = None
     #: The oldest Cronplane the action says it runs on (from the report).
     requires_cronplane: str | None = None
+    #: Its test flows (from `cronplane test --plan`); none before it is read.
+    plan: Plan = NO_PLAN
+    services: Services = Services.START
 
 
 def tool(name: str, *args: str) -> list[str]:
@@ -154,34 +183,64 @@ def cronplane(ctx: Context) -> list[Command]:
     ]
 
 
-def tests(ctx: Context) -> list[Command]:
-    """pytest with coverage, once per version; the action's threshold
-    (`fail_under`) applies."""
+def coverage_data(ctx: Context, version: str) -> Path:
+    """Where the tests of one version keep what they covered."""
+    return ctx.work / f"coverage-{version}"
+
+
+def _pytest(
+    ctx: Context,
+    version: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+    passes: tuple[int, ...] = (0,),
+) -> Command:
+    """pytest with coverage on one version, with the test tools the kit pins."""
+    return Command(
+        [
+            "uv",
+            "run",
+            "--frozen",
+            "--python",
+            version,
+            "--with",
+            PYTEST,
+            "--with",
+            PYTEST_COV,
+            "pytest",
+            "--cov=.",
+            "--cov-branch",
+            "--cov-report=term-missing",
+            *args,
+        ],
+        ctx.action,
+        {
+            **(env or {}),
+            "UV_PROJECT_ENVIRONMENT": str(environment(ctx, version)),
+            "COVERAGE_FILE": str(coverage_data(ctx, version)),
+        },
+        passes=passes,
+    )
+
+
+def unit(ctx: Context) -> list[Command]:
+    """The tests that need no service (`-m "not integration"`), once per
+    version. The action's coverage threshold (`fail_under`) applies here,
+    unless the action has an integration level: it then applies there, to
+    what both steps covered."""
     coverage_floor(ctx.action)
+    alone = not ctx.plan.of(Level.INTEGRATION)
+    marked = marked_tests(ctx.action) if alone else None
+    if marked is not None:
+        raise StepError(
+            f"{marked} has a test marked integration: an integration flow (tests/flows, "
+            "level: integration) names its service, or the test is never run"
+        )
+    floor = () if alone else ("--cov-fail-under=0",)
     commands: list[Command] = []
     for version in ctx.versions:
         commands.append(_sync(ctx, version))
-        commands.append(
-            Command(
-                [
-                    "uv",
-                    "run",
-                    "--frozen",
-                    "--python",
-                    version,
-                    "--with",
-                    PYTEST,
-                    "--with",
-                    PYTEST_COV,
-                    "pytest",
-                    "--cov=.",
-                    "--cov-branch",
-                    "--cov-report=term-missing",
-                ],
-                ctx.action,
-                {"UV_PROJECT_ENVIRONMENT": str(environment(ctx, version))},
-            )
-        )
+        commands.append(_pytest(ctx, version, "-m", "not integration", *floor))
     return commands
 
 
@@ -228,15 +287,70 @@ def licences(ctx: Context) -> list[Command]:
     ]
 
 
-def flows(ctx: Context) -> list[Command]:
-    """`cronplane run` on each flow of `tests/flows`, with its secrets file when there is one."""
-    directory = ctx.action / "tests" / "flows"
-    secrets = directory / "secrets.env"
-    extra = ["--secret-file", str(secrets)] if secrets.is_file() else []
-    return [
-        Command([str(ctx.cronplane), "run", str(flow), *extra], ctx.action)
-        for flow in sorted(directory.glob("*.yaml"))
-    ]
+def _cronplane_test(ctx: Context, level: Level) -> Command:
+    """The flows of one level; their runs are kept out of the action's folder,
+    which the other steps read."""
+    runs = ["--runs-dir", str(ctx.work / "runs")]
+    return Command(
+        [str(ctx.cronplane), "test", str(ctx.action), "--level", level.value, *runs], ctx.action
+    )
+
+
+def marked_tests(action: Path) -> str | None:
+    """The first Python file of the action, from its folder, that marks a test
+    `integration`; none of an environment or a hidden folder."""
+    for path in sorted(action.rglob("*.py")):
+        inside = path.relative_to(action)
+        if any(part.startswith(".") or part == "node_modules" for part in inside.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "mark.integration" in text:
+            return str(inside)
+    return None
+
+
+def e2e(ctx: Context) -> list[Command]:
+    """`cronplane test` on the flows that need doubles only. An action has
+    one test flow at least."""
+    if not ctx.plan.flows:
+        raise StepError(
+            "an action has one test flow at least: tests/flows/<name>.yaml with a test: block"
+        )
+    return [_cronplane_test(ctx, Level.E2E)] if ctx.plan.of(Level.E2E) else []
+
+
+def integration(ctx: Context) -> list[Command]:
+    """With the services of `tests/compose.yaml` the integration flows name:
+    the tests of the language marked `integration`, with the test values of
+    those flows in the environment, then the flows. What these tests cover
+    is added to what the unit step covered, and the action's coverage
+    threshold applies to the sum. Without the unit step before it in the same
+    check, every test runs here. The services are stopped whatever fails. A
+    service that does not start fails the step: a test is never skipped."""
+    if not ctx.plan.of(Level.INTEGRATION):
+        return []
+    values = ctx.plan.variables()
+    compose = ["docker", "compose", "-f", str(ctx.action / "tests" / "compose.yaml")]
+    commands: list[Command] = []
+    if ctx.services is Services.START:
+        commands.append(Command([*compose, "up", "-d", "--wait", *ctx.plan.services], ctx.action))
+    for version in ctx.versions:
+        commands.append(_sync(ctx, version))
+        if coverage_data(ctx, version).is_file():
+            # An action may have integration flows and no marked test: the sum is still measured.
+            marked = ("-m", "integration", "--cov-append")
+            commands.append(
+                _pytest(ctx, version, *marked, env=values, passes=(0, NO_TEST_COLLECTED))
+            )
+        else:
+            commands.append(_pytest(ctx, version, env=values))
+    commands.append(_cronplane_test(ctx, Level.INTEGRATION))
+    if ctx.services is Services.START:
+        commands.append(Command([*compose, "down", "-v"], ctx.action, when=When.ALWAYS))
+    return commands
 
 
 STEPS = {
@@ -246,10 +360,11 @@ STEPS = {
     Step.LINT: lint,
     Step.TYPES: types,
     Step.CRONPLANE: cronplane,
-    Step.TESTS: tests,
+    Step.UNIT: unit,
     Step.AUDIT: audit,
     Step.LICENCES: licences,
-    Step.FLOWS: flows,
+    Step.E2E: e2e,
+    Step.INTEGRATION: integration,
 }
 
 

@@ -1,0 +1,13 @@
+# A test flow: `cronplane test` runs it and compares its run with `expect`.
+# The kit runs it at its e2e step; the hub shows it as an example.
+version: 1
+name: my-action-hello
+test:
+  level: e2e
+  example: true
+  expect:
+    outputs: {hello: {greeting: HELLO ADA}}
+steps:
+  - id: hello
+    uses: /
+    with: {who: Ada, shout: true}

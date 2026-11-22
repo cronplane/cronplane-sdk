@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { KIT } from "../src/cli.ts";
-import { build, coverageFloor, STEPS, StepError } from "../src/steps.ts";
-import { action, context } from "./helpers.ts";
+import { build, coverageFloor, STEPS, StepError, testFiles } from "../src/steps.ts";
+import { action, context, plan } from "./helpers.ts";
 
 const argv = (step: (typeof STEPS)[number], folder: string): string[][] =>
   build(step, context(folder)).map((command) => [...command.argv]);
@@ -33,11 +33,38 @@ test("the rules are the kit's whatever the action configures", () => {
   expect(lint?.env?.["CRONPLANE_KIT_TSCONFIG"]).toBe(join(folder, "..", "work", "tsconfig.json"));
 });
 
-test("tests run once per Bun version of the matrix", () => {
-  expect(argv("tests", action())).toEqual([
+test("unit tests run once per Bun version of the matrix", () => {
+  expect(argv("unit", action())).toEqual([
     ["mise", "exec", "bun@1.3", "--", "bun", "test", "--coverage"],
     ["mise", "exec", "bun@1.4", "--", "bun", "test", "--coverage"],
   ]);
+});
+
+test("the tests that need a service run at the integration level, the others twice", () => {
+  const folder = action();
+  mkdirSync(join(folder, "src", "deep"), { recursive: true });
+  mkdirSync(join(folder, "node_modules", "x"), { recursive: true });
+  mkdirSync(join(folder, ".cache"));
+  for (const file of ["b.test.ts", "src/a_spec.js", "src/deep/store.integration.test.ts", "src/helper.ts", "node_modules/x/y.test.ts", ".cache/z.test.ts"]) {
+    writeFileSync(join(folder, file), "");
+  }
+  expect(testFiles(folder)).toEqual({ unit: ["./b.test.ts", "./src/a_spec.js"], integration: ["./src/deep/store.integration.test.ts"] });
+
+  const flows = plan([["write.yaml", "integration", { postgres_url: "postgresql://x" }]], ["postgres"]);
+  const ctx = context(folder, ["1.3", "1.4"], flows);
+  expect(build("unit", ctx).map((command) => command.argv)).toEqual([
+    ["mise", "exec", "bun@1.3", "--", "bun", "test", "./b.test.ts", "./src/a_spec.js"],
+    ["mise", "exec", "bun@1.4", "--", "bun", "test", "./b.test.ts", "./src/a_spec.js"],
+  ]);
+  const [, first, second, third] = build("integration", ctx);
+  expect([first?.argv, first?.env]).toEqual([["mise", "exec", "bun@1.3", "--", "bun", "test", "--coverage"], { POSTGRES_URL: "postgresql://x" }]);
+  expect(second?.argv.at(2)).toBe("bun@1.4");
+  expect(third?.argv.slice(3, 5)).toEqual(["--level", "integration"]);
+
+  expect(() => build("unit", context(folder))).toThrow(/store\.integration\.test\.ts needs a service/);
+  rmSync(join(folder, "b.test.ts"));
+  rmSync(join(folder, "src", "a_spec.js"));
+  expect(build("unit", ctx)).toEqual([]);
 });
 
 test("the coverage threshold is required", () => {
@@ -67,16 +94,24 @@ test("the SBOM goes where it is asked", () => {
   expect(check?.argv.at(-1)).toBe("/kept/sbom.json");
 });
 
-test("flows run with their secrets file", () => {
+test("the e2e level runs the flows that need doubles only", () => {
   const folder = action();
-  expect(argv("flows", folder)).toEqual([]);
-  const flows = join(folder, "tests", "flows");
-  mkdirSync(flows, { recursive: true });
-  writeFileSync(join(flows, "b.yaml"), "");
-  writeFileSync(join(flows, "a.yaml"), "");
-  expect(argv("flows", folder).map((command) => command[2])).toEqual([join(flows, "a.yaml"), join(flows, "b.yaml")]);
-  writeFileSync(join(flows, "secrets.env"), "TOKEN=x\n");
-  expect(argv("flows", folder)[0]?.slice(-2)).toEqual(["--secret-file", join(flows, "secrets.env")]);
+  expect(argv("e2e", folder)).toEqual([["/bin/cronplane", "test", folder, "--level", "e2e", "--runs-dir", join(folder, "..", "work", "runs")]]);
+  const services = context(folder, ["1.4"], plan([["write.yaml", "integration"]], ["postgres"]));
+  expect(build("e2e", services)).toEqual([]);
+  expect(() => build("e2e", context(folder, ["1.4"], plan([])))).toThrow(/one test flow at least/);
+});
+
+test("the integration level runs between the start and the stop of its services", () => {
+  const folder = action();
+  expect(argv("integration", folder)).toEqual([]);
+  const ctx = context(folder, ["1.4"], plan([["write.yaml", "integration"]], ["postgres", "cache"]));
+  const compose = ["docker", "compose", "-f", join(folder, "tests", "compose.yaml")];
+  const [up, flows, down] = build("integration", ctx);
+  expect(up?.argv).toEqual([...compose, "up", "-d", "--wait", "postgres", "cache"]);
+  expect(flows?.argv.slice(0, 5)).toEqual(["/bin/cronplane", "test", folder, "--level", "integration"]);
+  expect([down?.argv, down?.when]).toEqual([[...compose, "down", "-v"], "always"]);
+  expect(build("integration", { ...ctx, services: "running" })).toEqual(flows === undefined ? [] : [flows]);
 });
 
 test("the lockfile is checked by Bun in the action's folder", () => {

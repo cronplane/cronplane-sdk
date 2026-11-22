@@ -21,7 +21,7 @@ class Outcome:
 
     @property
     def ok(self) -> bool:
-        return self.code == 0
+        return self.code in self.command.passes
 
 
 Runner = Callable[[Command], Outcome]
